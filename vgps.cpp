@@ -37,7 +37,21 @@ static volatile LONG    s_notifyPosted;
 static char             s_line[128];
 static int              s_lineLen;
 
-static const DWORD      kReadPauseMs = 50;   // let the driver collect a chunk instead of spinning on bytes
+static const DWORD      kReadPauseMs = 100;  // let the driver collect a chunk instead of spinning on bytes
+
+// Where the reader's CPU time goes (HU 2026-10-18: the thread took ~80 % of the CPU), logged once a minute.
+struct ReadStats {
+    DWORD start, polls, pollMs, reads, empty, readMs, parseMs, bytes;
+};
+static ReadStats s_rs;
+
+static DWORD ThreadMs()   // this thread's kernel + user time; the low parts are enough for differences
+{
+    FILETIME c, e, k, u;
+    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u))
+        return 0;
+    return (k.dwLowDateTime + u.dwLowDateTime) / 10000;
+}
 
 static void Logf(const char* fmt, ...)
 {
@@ -288,6 +302,7 @@ static HANDLE OpenPort(const wchar_t* port, DWORD baud, DWORD* err)
 }
 
 // What is already in the driver queue, waiting up to waitMs (polling: comm timeouts are the shell's too).
+// A queue that says it has bytes but reads none counts as empty: no spinning on it.
 static int ReadAvailable(HANDLE h, char* buf, DWORD size, DWORD waitMs)
 {
     DWORD start = GetTickCount();
@@ -295,13 +310,23 @@ static int ReadAvailable(HANDLE h, char* buf, DWORD size, DWORD waitMs)
         DWORD errors = 0;
         COMSTAT st;
         memset(&st, 0, sizeof(st));
-        if (!ClearCommError(h, &errors, &st))
+        DWORD t = ThreadMs();
+        BOOL ok = ClearCommError(h, &errors, &st);
+        s_rs.polls++;
+        s_rs.pollMs += ThreadMs() - t;
+        if (!ok)
             return -1;
         if (st.cbInQue) {
             DWORD got = 0;
-            if (!ReadFile(h, buf, st.cbInQue < size ? st.cbInQue : size, &got, NULL))
+            t = ThreadMs();
+            ok = ReadFile(h, buf, st.cbInQue < size ? st.cbInQue : size, &got, NULL);
+            s_rs.reads++;
+            s_rs.readMs += ThreadMs() - t;
+            if (!ok)
                 return -1;
-            return (int)got;
+            if (got)
+                return (int)got;
+            s_rs.empty++;
         }
         if (s_stop || s_reopen || s_scanReq || GetTickCount() - start >= waitMs)
             return 0;
@@ -481,9 +506,19 @@ static void ReadPortLoop()
             EnterCriticalSection(&s_cs);
             s_state.bytes += got;
             LeaveCriticalSection(&s_cs);
+            DWORD t = ThreadMs();
             if (s_cfg.onRaw)
                 s_cfg.onRaw(buf, got);
             Feed(buf, got);
+            s_rs.parseMs += ThreadMs() - t;
+            s_rs.bytes += got;
+            if (lastData - s_rs.start >= 60000) {
+                if (s_rs.start)
+                    Logf("gps: 60 s: polls %lu (%lu ms), reads %lu, empty %lu (%lu ms), parse %lu ms, %lu bytes",
+                         s_rs.polls, s_rs.pollMs, s_rs.reads, s_rs.empty, s_rs.readMs, s_rs.parseMs, s_rs.bytes);
+                memset(&s_rs, 0, sizeof(s_rs));
+                s_rs.start = lastData;
+            }
             Sleep(kReadPauseMs);
         }
         CloseHandle(h);
@@ -552,6 +587,7 @@ static bool FollowLoop()
 
 static DWORD WINAPI GpsThread(LPVOID)
 {
+    Logf("gps: thread id %08X", (unsigned)GetCurrentThreadId());
     while (!s_stop) {
         // no mutex (could not be created): read the port alone, as before
         DWORD w = s_mutex ? WaitForSingleObject(s_mutex, 0) : WAIT_OBJECT_0;
