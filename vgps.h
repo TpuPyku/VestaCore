@@ -68,4 +68,20 @@ void GpsGet(GpsState* s);                             // also re-arms the notify
 void GpsConfigure(const wchar_t* port, DWORD baud);   // reopen with new settings (used when reading the port)
 void GpsScan();                                       // look for NMEA on COM1..COM9 (only when reading the port)
 
+// ---- the shared memory "VestaGPS" (the reader's state and its last checked lines), here for the programs and
+// drivers that only read it (VestaHome's NMEA port VestaNMEA.dll). The state is written under a sequence lock: seq
+// odd while writing, even when done. A line is written first, then lineSeq counts it (one writer: the reader).
+#define VGPS_SHM_NAME  L"VestaGPS"
+#define VGPS_MAGIC     0x53504756   // "VGPS"
+enum { kShmLines = 64, kShmLineLen = 100 };
+
+struct GpsShm {
+    DWORD         magic, version;
+    volatile LONG seq;              // state's sequence lock
+    DWORD         beat;             // GetTickCount() of the last publish
+    GpsState      state;            // the reader's state (owner = 1 there)
+    volatile LONG lineSeq;          // lines written so far: line n (from 1) is lines[(n - 1) % kShmLines]
+    char          lines[kShmLines][kShmLineLen];   // checked '$' / '@' lines with their "*hh", no CR LF
+};
+
 #endif

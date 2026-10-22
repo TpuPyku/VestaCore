@@ -6,22 +6,9 @@
 #include <string.h>
 #include <stdarg.h>
 
-// ---- shared memory: the reader's state and its last checked lines.
-// The reader writes under a sequence lock: seq odd while writing, even when done; a copy is taken only
-// between two equal even values.
-#define VGPS_SHM_NAME  L"VestaGPS"
+// ---- shared memory (GpsShm, vgps.h): the reader's state and its last checked lines; a copy of the state is taken
+// only between two equal even values of its sequence lock.
 #define VGPS_MUTEX     L"VestaGPS_Owner"
-#define VGPS_MAGIC     0x53504756   // "VGPS"
-enum { kShmLines = 64, kShmLineLen = 100 };
-
-struct GpsShm {
-    DWORD         magic, version;
-    volatile LONG seq;              // state's sequence lock
-    DWORD         beat;             // GetTickCount() of the last publish
-    GpsState      state;            // the reader's state (owner = 1 there)
-    volatile LONG lineSeq;          // lines written so far
-    char          lines[kShmLines][kShmLineLen];
-};
 
 static CRITICAL_SECTION s_cs;
 static GpsState         s_state;
@@ -94,10 +81,11 @@ static void PublishLine(const char* s)
 {
     if (!s_shm)
         return;
-    LONG n = InterlockedIncrement((LONG*)&s_shm->lineSeq);
-    char* dst = s_shm->lines[(n - 1) % kShmLines];
+    LONG n = s_shm->lineSeq + 1;   // the line first, then its count (2026-10-22: a reader could take the slot
+    char* dst = s_shm->lines[(n - 1) % kShmLines];   // before it was written); one writer - the port's reader
     strncpy(dst, s, kShmLineLen - 1);
     dst[kShmLineLen - 1] = 0;
+    InterlockedExchange((LONG*)&s_shm->lineSeq, n);
 }
 
 static int HexDigit(char c)
