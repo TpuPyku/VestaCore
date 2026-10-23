@@ -331,7 +331,12 @@ bool TaskIsSystem(const wchar_t* exe)
     static const wchar_t* sys[] = { L"nk.exe", L"filesys.exe", L"device.exe", L"udevice.exe", L"gwes.exe",
                                     L"services.exe", L"servicesd.exe", L"srvtrust.exe",
                                     L"System", L"smss.exe", L"csrss.exe", L"wininit.exe", L"winlogon.exe",
-                                    L"lsass.exe" };
+                                    L"lsass.exe",
+                                    // the unit's firmware (2026-10-23, the user): Main.exe starts the shell and holds
+                                    // SPIPowerMgr.dll, the shell (or our loader in its place), the watchdog and its
+                                    // driver service - ending them resets the unit or takes the MCU's link down
+                                    L"Main.exe", L"G3NavHMI.exe", L"HzWD.exe", L"dr_Service.exe",
+                                    L"[System Process]" };   // (the PC's: the PC build's test)
     for (int i = 0; i < (int)(sizeof(sys) / sizeof(sys[0])); i++)
         if (!_wcsicmp(exe, sys[i]))
             return true;

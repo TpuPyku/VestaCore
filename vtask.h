@@ -55,7 +55,8 @@ void TaskSort(TaskInfo* t, int key);
 // Ends a process (exe: its name, see TaskIsSystem); false = refused (a system process, the caller itself)
 // or failed.
 bool TaskKill(DWORD pid, const wchar_t* exe);
-// The unit's system processes (nk.exe, device.exe, gwes.exe ...): ending them hangs the unit.
+// The unit's system processes (nk.exe, device.exe, gwes.exe ..., the firmware's Main.exe, G3NavHMI.exe, HzWD.exe,
+// dr_Service.exe): ending them hangs or resets the unit.
 bool TaskIsSystem(const wchar_t* exe);
 
 #endif
