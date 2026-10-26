@@ -29,7 +29,7 @@ echo === x86 (desktop)
   /I"%VC%\include" /I"%VC%\PlatformSDK\Include"
 if errorlevel 1 goto fail
 "%VC%\bin\link.exe" /nologo /SUBSYSTEM:WINDOWS /OUT:"%OUT%\SamplePC.exe" obj\pc\sample.obj ^
-  /LIBPATH:"%VC%\lib" /LIBPATH:"%VC%\PlatformSDK\Lib" user32.lib kernel32.lib
+  /LIBPATH:"%VC%\lib" /LIBPATH:"%VC%\PlatformSDK\Lib" user32.lib gdi32.lib kernel32.lib
 if errorlevel 1 goto fail
 
 echo === OK
