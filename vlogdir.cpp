@@ -42,7 +42,6 @@ bool LogDir(wchar_t* dir, const wchar_t* exeDir)
     static wchar_t s_dir[MAX_PATH];
     static DWORD   s_tick;
     static bool    s_ok, s_tried;
-    (void)exeDir;
     if (!s_tried || GetTickCount() - s_tick > 30000) {
         static const wchar_t* vols[4] = { L"\\SDMemory", L"\\USB Disk", L"\\USBDisk", L"\\USBDevice" };
         s_tried = true;
@@ -51,8 +50,15 @@ bool LogDir(wchar_t* dir, const wchar_t* exeDir)
         for (int i = 0; i < 4 && !s_ok; i++)
             s_ok = MakeLogs(vols[i], s_dir);
         // the Vesta's unit (its shell's folder there): never its built-in flash (\SDMMC...) - elsewhere any card
-        if (!s_ok && GetFileAttributes(L"\\ResidentFlash\\navigation\\app") == 0xFFFFFFFF)
+        // else the exe's folder (the user 2026-10-29: a Shturmann NSL 500 gave no log - its card is not marked
+        // removable)
+        if (!s_ok && GetFileAttributes(L"\\ResidentFlash\\navigation\\app") == 0xFFFFFFFF) {
             s_ok = AnyCard(s_dir);
+            if (!s_ok && exeDir && exeDir[0]) {
+                wcsncpy(s_dir, exeDir, MAX_PATH - 1);
+                s_ok = true;
+            }
+        }
     }
     if (s_ok)
         wcscpy(dir, s_dir);
