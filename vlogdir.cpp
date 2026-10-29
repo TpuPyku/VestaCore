@@ -3,6 +3,39 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef UNDER_CE
+static bool MakeLogs(const wchar_t* vol, wchar_t* dir)   // vol\VestaLogs\ made there; false - cannot
+{
+    DWORD a = GetFileAttributes(vol);
+    if (a == 0xFFFFFFFF || !(a & FILE_ATTRIBUTE_DIRECTORY))
+        return false;
+    _snwprintf(dir, MAX_PATH, L"%s\\VestaLogs\\", vol);
+    dir[MAX_PATH - 1] = 0;
+    CreateDirectory(dir, NULL);
+    DWORD b = GetFileAttributes(dir);
+    return b != 0xFFFFFFFF && (b & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// Another device than the Vesta's head unit (the user 2026-10-29: OSMapsCE on a Shturmann NSL 500 - its card is
+// "\SDMMC", the Vesta's built-in one's name): the first storage card of the root (FILE_ATTRIBUTE_TEMPORARY)
+static bool AnyCard(wchar_t* dir)
+{
+    WIN32_FIND_DATA fd;
+    HANDLE ff = FindFirstFile(L"\\*", &fd);
+    if (ff == INVALID_HANDLE_VALUE)
+        return false;
+    bool ok = false;
+    do {
+        wchar_t vol[MAX_PATH];
+        _snwprintf(vol, MAX_PATH, L"\\%s", fd.cFileName);
+        ok = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && (fd.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY) &&
+             MakeLogs(vol, dir);
+    } while (!ok && FindNextFile(ff, &fd));
+    FindClose(ff);
+    return ok;
+}
+#endif
+
 bool LogDir(wchar_t* dir, const wchar_t* exeDir)
 {
 #ifdef UNDER_CE
@@ -15,16 +48,11 @@ bool LogDir(wchar_t* dir, const wchar_t* exeDir)
         s_tried = true;
         s_tick = GetTickCount();
         s_ok = false;
-        for (int i = 0; i < 4 && !s_ok; i++) {
-            DWORD a = GetFileAttributes(vols[i]);
-            if (a == 0xFFFFFFFF || !(a & FILE_ATTRIBUTE_DIRECTORY))
-                continue;
-            _snwprintf(s_dir, MAX_PATH, L"%s\\VestaLogs\\", vols[i]);
-            s_dir[MAX_PATH - 1] = 0;
-            CreateDirectory(s_dir, NULL);
-            DWORD b = GetFileAttributes(s_dir);
-            s_ok = b != 0xFFFFFFFF && (b & FILE_ATTRIBUTE_DIRECTORY);
-        }
+        for (int i = 0; i < 4 && !s_ok; i++)
+            s_ok = MakeLogs(vols[i], s_dir);
+        // the Vesta's unit (its shell's folder there): never its built-in flash (\SDMMC...) - elsewhere any card
+        if (!s_ok && GetFileAttributes(L"\\ResidentFlash\\navigation\\app") == 0xFFFFFFFF)
+            s_ok = AnyCard(s_dir);
     }
     if (s_ok)
         wcscpy(dir, s_dir);

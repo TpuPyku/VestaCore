@@ -2,7 +2,8 @@
 //
 // Only removable media: the SD card or a USB disk (folder VestaLogs on it); never the unit's built-in flash
 // (\SDMMC, \ResidentFlash, \StorageFlash), which would wear out under logs. Without a card or a disk there
-// is no log. Looked up again every 30 s, a card may be put in later. PC test builds: the exe's folder.
+// is no log. On another device (no Vesta shell's folder): its first storage card, whatever its name. Looked up
+// again every 30 s, a card may be put in later. PC test builds: the exe's folder.
 #ifndef VLOGDIR_H
 #define VLOGDIR_H
 
