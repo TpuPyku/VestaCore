@@ -1,4 +1,4 @@
-// vfavs.cpp - VestaCore: the favourite places (vfavs.h).
+﻿// vfavs.cpp - VestaCore: the favourite places (vfavs.h).
 #include "vfavs.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,24 +9,57 @@ void VFavsClear(VFavs* f)
     memset(f, 0, sizeof(*f));
 }
 
+static int IconOf(const wchar_t* name)   // a new one's sign: Дом, Работа - theirs, else the star
+{
+    if (!wcscmp(name, L"Дом") || !wcscmp(name, L"дом"))
+        return VFAV_HOME;
+    return !wcscmp(name, L"Работа") || !wcscmp(name, L"работа") ? VFAV_WORK : VFAV_STAR;
+}
+
+static void NameCopy(wchar_t* to, const wchar_t* name)
+{
+    wcsncpy(to, name, VFAV_NAME - 1);
+    to[VFAV_NAME - 1] = 0;
+}
+
+static int Find(const VFavs* f, const wchar_t* name)   // (the name as kept: cut)
+{
+    wchar_t v[VFAV_NAME];
+    NameCopy(v, name);
+    for (int i = 0; i < f->n; i++)
+        if (!wcscmp(f->f[i].name, v))
+            return i;
+    return -1;
+}
+
 int VFavsAdd(VFavs* f, const wchar_t* name, double lat, double lon)
 {
     if (!name || !name[0])
         return -1;
-    VFav v;
-    wcsncpy(v.name, name, VFAV_NAME - 1);
-    v.name[VFAV_NAME - 1] = 0;
-    v.lat = lat;
-    v.lon = lon;
-    for (int i = 0; i < f->n; i++)
-        if (!wcscmp(f->f[i].name, v.name)) {
-            f->f[i] = v;
-            return i;
-        }
-    if (f->n >= VFAV_MAX)
+    int i = Find(f, name);
+    if (i < 0) {
+        if (f->n >= VFAV_MAX)
+            return -1;
+        i = f->n++;
+        NameCopy(f->f[i].name, name);
+        f->f[i].icon = IconOf(f->f[i].name);
+    }
+    f->f[i].lat = lat;
+    f->f[i].lon = lon;
+    return i;
+}
+
+int VFavsRename(VFavs* f, int i, const wchar_t* name)
+{
+    if (i < 0 || i >= f->n || !name || !name[0])
         return -1;
-    f->f[f->n] = v;
-    return f->n++;
+    int other = Find(f, name);
+    if (other >= 0 && other != i) {
+        VFavsDel(f, other);
+        i -= other < i;
+    }
+    NameCopy(f->f[i].name, name);
+    return i;
 }
 
 void VFavsDel(VFavs* f, int i)
@@ -37,7 +70,15 @@ void VFavsDel(VFavs* f, int i)
     f->n--;
 }
 
-static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon"; anything else left out
+static int SignOf(const char* tab, int byName)   // the sign's column ("<TAB>n"); none: by the name; bad: the star
+{
+    if (!tab)
+        return byName;
+    int icon = atoi(tab + 1);
+    return icon >= 0 && icon < VFAV_ICONS ? icon : VFAV_STAR;
+}
+
+static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon[<TAB>sign]"; anything else left out
 {
     char* t1 = strchr(s, '\t');
     char* t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
@@ -45,8 +86,10 @@ static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon"; anything el
         return;
     *t1 = 0;
     wchar_t name[VFAV_NAME * 2];
-    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, name, VFAV_NAME * 2) > 0)
-        VFavsAdd(f, name, atof(t1 + 1), atof(t2 + 1));
+    int i = MultiByteToWideChar(CP_UTF8, 0, s, -1, name, VFAV_NAME * 2) > 0 ?
+            VFavsAdd(f, name, atof(t1 + 1), atof(t2 + 1)) : -1;
+    if (i >= 0)
+        f->f[i].icon = SignOf(strchr(t2 + 1, '\t'), f->f[i].icon);
 }
 
 bool VFavsLoad(VFavs* f, const wchar_t* path)
@@ -83,7 +126,8 @@ bool VFavsSave(const VFavs* f, const wchar_t* path)
     for (int i = 0; i < f->n && ok; i++) {
         char name[VFAV_NAME * 4], line[VFAV_NAME * 4 + 64];
         WideCharToMultiByte(CP_UTF8, 0, f->f[i].name, -1, name, sizeof(name), NULL, NULL);
-        int len = _snprintf(line, sizeof(line), "%s\t%.6f\t%.6f\r\n", name, f->f[i].lat, f->f[i].lon);
+        int len = _snprintf(line, sizeof(line), "%s\t%.6f\t%.6f\t%d\r\n", name, f->f[i].lat, f->f[i].lon,
+                            f->f[i].icon);
         DWORD put = 0;
         ok = len > 0 && WriteFile(h, line, len, &put, NULL) && put == (DWORD)len;
     }
