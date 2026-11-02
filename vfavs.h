@@ -8,7 +8,8 @@
 #include <windows.h>
 
 enum { VFAV_MAX = 12, VFAV_NAME = 24 };
-enum { VFAV_STAR, VFAV_HOME, VFAV_WORK, VFAV_FLAG, VFAV_HEART, VFAV_FUEL, VFAV_ICONS };
+enum { VFAV_STAR, VFAV_HOME, VFAV_WORK, VFAV_FLAG, VFAV_HEART, VFAV_FUEL, VFAV_COTTAGE, VFAV_FLATS, VFAV_SHOP,
+       VFAV_HOSPITAL, VFAV_SCHOOL, VFAV_PARKING, VFAV_ICONS };   // (their numbers are in the files: added at the end)
 
 struct VFav { wchar_t name[VFAV_NAME]; double lat, lon; int icon; };
 struct VFavs { VFav f[VFAV_MAX]; int n; };

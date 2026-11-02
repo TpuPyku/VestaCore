@@ -71,11 +71,18 @@ int main()
     VFavsClear(&f);
     VFavsAdd(&f, L"Дом", 1, 1);
     VFavsAdd(&f, L"работа", 2, 2);
-    VFavsAdd(&f, L"Дача", 3, 3);
+    VFavsAdd(&f, L"Озеро", 3, 3);
     Check(f.f[0].icon == VFAV_HOME && f.f[1].icon == VFAV_WORK && f.f[2].icon == VFAV_STAR,
           "favs: a new one's sign by its name (Дом, Работа), else the star");
+    VFavs d;
+    VFavsClear(&d);
+    VFavsAdd(&d, L"Дача", 1, 1);
+    VFavsAdd(&d, L"дача", 1, 1);
+    VFavsAdd(&d, L"Дом", 1, 1);
+    Check(d.f[0].icon == VFAV_COTTAGE && d.f[1].icon == VFAV_COTTAGE && d.f[2].icon == VFAV_HOME,
+          "favs: Дача - the country house");
     f.f[2].icon = VFAV_FLAG;
-    VFavsAdd(&f, L"Дача", 4, 4);
+    VFavsAdd(&f, L"Озеро", 4, 4);
     Check(f.n == 3 && f.f[2].icon == VFAV_FLAG && Near(f.f[2].lat, 4), "favs: a place replaced keeps its sign");
     Check(VFavsRename(&f, 2, L"Сад") == 2 && !wcscmp(f.f[2].name, L"Сад") && f.f[2].icon == VFAV_FLAG && f.n == 3,
           "favs: renamed, the sign and the place kept");
@@ -96,7 +103,7 @@ int main()
     Check(VFavsSave(&f, path) && VFavsLoad(&g, path) && g.n == 2 && g.f[0].icon == VFAV_FUEL && g.f[1].icon ==
           VFAV_FLAG, "favs: the signs read back as written");
     t = _wfopen(path, L"wb");
-    fputs("\xD0\x94\xD0\xBE\xD0\xBC\t1\t2\r\nA\t1\t2\t4\r\nB\t1\t2\t99\r\nC\t1\t2\t-1\r\nD\t1\t2\t5\nE\t1\t2\t6\n"
+    fputs("\xD0\x94\xD0\xBE\xD0\xBC\t1\t2\r\nA\t1\t2\t4\r\nB\t1\t2\t99\r\nC\t1\t2\t-1\r\nD\t1\t2\t11\nE\t1\t2\t12\n"
           "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\t1\t2\t3\n", t);
     fclose(t);
     Check(VFavsLoad(&g, path) && g.n == 6 && g.f[0].icon == VFAV_HOME && g.f[1].icon == 4 && g.f[2].icon ==

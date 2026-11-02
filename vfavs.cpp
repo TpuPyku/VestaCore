@@ -9,11 +9,15 @@ void VFavsClear(VFavs* f)
     memset(f, 0, sizeof(*f));
 }
 
-static int IconOf(const wchar_t* name)   // a new one's sign: Дом, Работа - theirs, else the star
+static int IconOf(const wchar_t* name)   // a new one's sign: Дом, Работа, Дача - theirs, else the star
 {
-    if (!wcscmp(name, L"Дом") || !wcscmp(name, L"дом"))
-        return VFAV_HOME;
-    return !wcscmp(name, L"Работа") || !wcscmp(name, L"работа") ? VFAV_WORK : VFAV_STAR;
+    static const struct { const wchar_t* name; int icon; } kBy[] = {
+        { L"Дом", VFAV_HOME }, { L"дом", VFAV_HOME }, { L"Работа", VFAV_WORK }, { L"работа", VFAV_WORK },
+        { L"Дача", VFAV_COTTAGE }, { L"дача", VFAV_COTTAGE } };
+    for (int i = 0; i < (int)(sizeof(kBy) / sizeof(kBy[0])); i++)
+        if (!wcscmp(name, kBy[i].name))
+            return kBy[i].icon;
+    return VFAV_STAR;
 }
 
 static void NameCopy(wchar_t* to, const wchar_t* name)
