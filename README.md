@@ -57,6 +57,18 @@ API — `vtask.h`: `TaskSample(&TaskInfo, self)`, `TaskSort`, `TaskKill`, `TaskI
 API — `vhttp.h`: `HttpInit(&HttpSetup)`, `HttpGet`, `HttpSetGpsDate`, `HttpCloseAll`, `HttpStreamOpen/Read/Abort/Close`.
 Проверка — `test_vhttp.bat` (ПК, нужен интернет: настоящие серверы).
 
+### `vhap` — протокол дополнений VestaHome
+- Команда — `WM_COPYDATA` с `dwData = VHAP_MAGIC` и текстом UTF-16 без нуля: `имя\tключ=значение\t…`
+  (описание — `VestaHome/docs/plugin-api.md`). `VhapSend` отправляет (до 511 знаков) и возвращает ответ окна,
+  `VhapField` читает поле. Им пользуются VestaHome и OSMapsCE; пример `plugins/sample` нарочно самостоятельный —
+  в нём протокол виден целиком.
+
+API — `vhap.h`. Проверка — `test_vhap.bat`.
+
+### `vfont` — шрифты
+- `VFontMake(face, height, weight)`: шрифт без сглаживания (на ГУ сглаживание становится ClearType — цветная
+  кайма в 16-битном кадре). Проверка — `test_vfont.bat`.
+
 ## Лицензия
 
 © 2026 TpuPyku. GNU GPL версии 3 (`LICENSE`): код можно свободно использовать, изменять и распространять, в том числе за деньги и в составе прошивок, но только вместе с исходным кодом всей программы, в которую он вошёл, и всех изменений, под той же лицензией.
