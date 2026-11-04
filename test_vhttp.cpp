@@ -1,5 +1,6 @@
-// test_vhttp.cpp - vhttp.cpp against real servers from the PC (needs the internet; the TLS ones' roots must be in
-// trust_anchors.inc - example.com's is not): plain and TLS answers, the
+// test_vhttp.cpp - vhttp.cpp against real servers from the PC (needs the internet; Yandex and Google - reachable
+// where others are blocked, the user 2026-11-04; the TLS ones' roots must be in trust_anchors.inc): plain and TLS
+// answers, the
 // headers in and out (If-None-Match / ETag, Range, Location), two threads at once, an endless stream (a radio).
 // Exit code: the failed checks.
 #include <winsock2.h>
@@ -29,20 +30,20 @@ static bool Get(const char* host, bool https, const char* path, int* status, uns
     return HttpGet(host, https, path, body, len, status, inm, etag, etagCap, extra) == NET_OK;
 }
 
-static const char* kRawHost = "raw.githubusercontent.com";   // ETag, If-None-Match and Range
-static const char* kRawPath = "/TpuPyku/VestaCore/master/README.md";
+static const char* kRawHost = "yastatic.net";   // a fixed file: ETag, If-None-Match and Range
+static const char* kRawPath = "/jquery/3.3.1/jquery.min.js";
 
 static void TestPlainAndTls()
 {
     int st, len;
     unsigned char* b;
-    bool ok = Get("example.com", false, "/", &st, &b, &len);
-    Check(ok && st == 200, "http example.com: 200");
-    Check(b && strstr((char*)b, "Example Domain") != 0, "http: the page's body");
+    bool ok = Get("www.google.com", false, "/robots.txt", &st, &b, &len);
+    Check(ok && st == 200, "http www.google.com: 200");
+    Check(b && !strncmp((char*)b, "User-agent:", 11), "http: the file's body");
     free(b);
     ok = Get(kRawHost, true, kRawPath, &st, &b, &len);
-    Check(ok && st == 200, "https raw.githubusercontent.com: 200");
-    Check(b && !strncmp((char*)b, "# VestaCore", 11), "https: the file's body");
+    Check(ok && st == 200, "https yastatic.net: 200");
+    Check(b && !strncmp((char*)b, "/*! jQuery v3.3.1", 17), "https: the file's body");
     free(b);
 }
 
@@ -66,9 +67,9 @@ static void TestHeaders()
 
     char loc[256] = "";
     HttpExtra where = { 0, loc, sizeof(loc) };
-    ok = Get("github.com", false, "/", &st, &b, &len, 0, 0, 0, &where);
+    ok = Get("google.com", false, "/", &st, &b, &len, 0, 0, 0, &where);
     free(b);
-    Check(ok && st == 301 && !strcmp(loc, "https://github.com/"), "Location of a redirect");
+    Check(ok && st == 301 && !strcmp(loc, "http://www.google.com/"), "Location of a redirect");
 }
 
 static DWORD WINAPI Worker(LPVOID p)
@@ -86,7 +87,7 @@ static DWORD WINAPI Worker(LPVOID p)
 
 static void TestThreads()   // the pool shared by the threads: each its own connection, all answered
 {
-    const char* hosts[2] = { "raw.githubusercontent.com", "github.com" };
+    const char* hosts[2] = { "yastatic.net", "www.google.com" };
     HANDLE t[2];
     for (int i = 0; i < 2; i++)
         t[i] = CreateThread(0, 0, Worker, (LPVOID)hosts[i], 0, 0);
