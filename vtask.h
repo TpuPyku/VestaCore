@@ -44,6 +44,10 @@ struct TaskInfo {
     DWORD    memTotalKB, memAvailKB;
     unsigned char cpuHist[TASK_HIST], memHist[TASK_HIST];   // percent, oldest first
     int      histCount;
+    // the last sample's clock and idle counters - each TaskInfo its own (HU 2026-11-05: a sample a minute and another
+    // every 2 s shared them - a minute's CPU over 2 s, every process at 100 %)
+    DWORD    tick, idle;
+    unsigned __int64 sysIdle, sysAll;
     int      sortKey;         // TS_*
     bool     sortDesc;
 };

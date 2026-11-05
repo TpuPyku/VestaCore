@@ -196,12 +196,10 @@ void TaskSample(TaskInfo* t, HWND self)
 {
     static TaskProc s_old[TASK_PROC_MAX];
     static int      s_oldCount;
-    static DWORD    s_tick, s_idle;
-    static unsigned __int64 s_sysIdle, s_sysAll;
     static int      s_round;
     Load();
     DWORD now = GetTickCount();
-    unsigned __int64 wall = s_tick ? (unsigned __int64)(now - s_tick) * 10000 : 0;   // 100 ns
+    unsigned __int64 wall = t->tick ? (unsigned __int64)(now - t->tick) * 10000 : 0;   // 100 ns
     bool memRound = s_round++ % 3 == 0;   // the memory walk is the slow part: every third sample
 
     memcpy(s_old, t->proc, t->procCount * sizeof(TaskProc));
@@ -273,11 +271,11 @@ void TaskSample(TaskInfo* t, HWND self)
 #ifdef UNDER_CE
     DWORD idle = s_fn.idle ? s_fn.idle() : 0xFFFFFFFF;
     if (idle != 0xFFFFFFFF) {
-        if (s_tick && now != s_tick) {
-            DWORD di = idle - s_idle, dt = now - s_tick;
+        if (t->tick && now != t->tick) {
+            DWORD di = idle - t->idle, dt = now - t->tick;
             t->cpu10 = di >= dt ? 0 : (int)((dt - di) * 1000 / dt);
         }
-        s_idle = idle;
+        t->idle = idle;
     } else if (wall) {
         t->cpu10 = sum10 > 1000 ? 1000 : sum10;   // no idle counter: the processes' sum
     }
@@ -285,15 +283,15 @@ void TaskSample(TaskInfo* t, HWND self)
     FILETIME fi, fk, fu;
     if (s_fn.sysTimes && s_fn.sysTimes(&fi, &fk, &fu)) {   // kernel time includes the idle time
         unsigned __int64 idle = Ft(fi), all = Ft(fk) + Ft(fu);
-        if (s_sysAll && all > s_sysAll)
-            t->cpu10 = (int)((all - s_sysAll - (idle - s_sysIdle)) * 1000 / (all - s_sysAll));
-        s_sysIdle = idle;
-        s_sysAll = all;
+        if (t->sysAll && all > t->sysAll)
+            t->cpu10 = (int)((all - t->sysAll - (idle - t->sysIdle)) * 1000 / (all - t->sysAll));
+        t->sysIdle = idle;
+        t->sysAll = all;
     } else if (wall) {
         t->cpu10 = sum10 > 1000 ? 1000 : sum10;
     }
 #endif
-    s_tick = now;
+    t->tick = now;
 
     MEMORYSTATUS ms;
     ms.dwLength = sizeof(ms);
