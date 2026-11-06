@@ -65,6 +65,11 @@ API — `vhttp.h`: `HttpInit(&HttpSetup)`, `HttpGet`, `HttpSetGpsDate`, `HttpClo
 
 API — `vhap.h`. Проверка — `test_vhap.bat`.
 
+### `vnav` — манёвр маршрута для VestaHome
+- Команда `nav` (её собирает OSMapsCE, разбирает VestaHome), разбор инструкции на действие и улицу, значок манёвра.
+
+API — `vnav.h`. Проверка — `test_vnav.bat`.
+
 ### `vfont` — шрифты
 - `VFontMake(face, height, weight)`: шрифт без сглаживания (на ГУ сглаживание становится ClearType — цветная
   кайма в 16-битном кадре). Проверка — `test_vfont.bat`.
