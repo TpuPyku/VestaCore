@@ -2,7 +2,7 @@
 // your own. A program of its own (Windows CE ARM and the desktop, for testing next to VestaHomePC.exe): a hidden
 // window, hello to VestaHome by WM_COPYDATA, then a widget "Счётчик" on the main screen, two described screens with
 // every kind of item (the first with a button in the bottom bar), a screen of its own window, and the speed and the
-// night from VestaHome's data. Put it in VestaHome\Plugins\Sample\Sample.exe: VestaHome starts it.
+// night from VestaHome's data. Put it in \ResidentFlash\VHContent\VHPlugins\Sample\Sample.exe: VestaHome starts it.
 #include <windows.h>
 #include <stdio.h>
 #include <stdarg.h>

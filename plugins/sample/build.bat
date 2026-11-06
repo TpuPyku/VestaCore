@@ -1,6 +1,6 @@
 @echo off
 rem Builds the sample add-on: Sample.exe (Windows CE, ARMv4) and SamplePC.exe (desktop, next to VestaHomePC.exe) with
-rem Visual Studio 2005. To try it: copy into VestaHome\Plugins\Sample\ as Sample.exe (VestaHome starts it).
+rem Visual Studio 2005. To try it: copy into \ResidentFlash\VHContent\VHPlugins\Sample\ as Sample.exe (VestaHome starts it).
 setlocal
 if "%VS8%"=="" set VS8=C:\Program Files (x86)\Microsoft Visual Studio 8
 set VC=%VS8%\VC
