@@ -47,6 +47,9 @@ typedef bool (*GpsKillFn)(const wchar_t* exe);
 // program reads the port - the raw bytes as read. Called from the module's thread.
 typedef void (*GpsLineFn)(const char* line);
 typedef void (*GpsRawFn)(const char* buf, DWORD len);
+// A program's own data instead of a port (a simulator, GpsSim): the next lines into buf (up to cap), their length;
+// 0 - none yet. Called about every 100 ms from the module's thread while this program is the reader.
+typedef int (*GpsSourceFn)(char* buf, int cap);
 
 struct GpsConfig {
     HWND           notify;        // gets msg (wParam 1 = a scan finished) at most once a second
@@ -60,6 +63,9 @@ struct GpsConfig {
     const wchar_t* exeDir;        // with a trailing '\', for the PC's .nmea recordings
     GpsLineFn      onLine;        // NULL = none
     GpsRawFn       onRaw;         // NULL = none
+    GpsSourceFn    source;        // NULL = the port; else this program's own lines (the port is not opened)
+    bool           takeOver;      // the reader asked to give the port up (the named event "VestaGPS_Yield"):
+                                  // it closes the port and follows this program until it stops (a simulator)
 };
 
 void GpsStart(const GpsConfig* cfg);

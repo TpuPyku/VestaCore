@@ -9,12 +9,13 @@
 // ---- shared memory (GpsShm, vgps.h): the reader's state and its last checked lines; a copy of the state is taken
 // only between two equal even values of its sequence lock.
 #define VGPS_MUTEX     L"VestaGPS_Owner"
+#define VGPS_YIELD     L"VestaGPS_Yield"   // set by a program taking the port over (GpsConfig.takeOver), reset when it has it
 
 static CRITICAL_SECTION s_cs;
 static GpsState         s_state;
 static GpsConfig        s_cfg;
 static wchar_t          s_cfgPort[16], s_cfgApp[24], s_cfgKill[32], s_cfgDir[MAX_PATH];
-static HANDLE           s_thread, s_wake, s_mutex, s_shmMap;
+static HANDLE           s_thread, s_wake, s_mutex, s_shmMap, s_yield;
 static GpsShm*          s_shm;
 static volatile bool    s_stop, s_reopen, s_scanReq;
 static wchar_t          s_port[16];
@@ -64,6 +65,12 @@ static void Notify(bool force)
     s_lastNotify = now;
     if (!PostMessage(s_cfg.notify, s_cfg.msg, 0, 0))
         s_notifyPosted = 0;
+}
+
+// A program taking the port over waits for it (VGPS_YIELD set): the reader gives it up, the others leave it alone.
+static bool YieldAsked()
+{
+    return s_yield && !s_cfg.takeOver && WaitForSingleObject(s_yield, 0) == WAIT_OBJECT_0;
 }
 
 // ---- publishing (the reader) and copying (the others)
@@ -414,9 +421,9 @@ static void PlayFile(const wchar_t* name)
     }
     SetStatus(GPS_OPEN, name, 0);
     s_lineLen = 0;
-    while (!s_stop && !s_reopen && !s_scanReq) {
+    while (!s_stop && !s_reopen && !s_scanReq && !YieldAsked()) {
         DWORD start = 0;
-        for (DWORD i = 0; i < len && !s_stop && !s_reopen && !s_scanReq; i++) {
+        for (DWORD i = 0; i < len && !s_stop && !s_reopen && !s_scanReq && !YieldAsked(); i++) {
             if (data[i] != '\n')
                 continue;
             EnterCriticalSection(&s_cs);
@@ -434,11 +441,36 @@ static void PlayFile(const wchar_t* name)
 }
 #endif
 
+// This program's own lines (GpsConfig.source) in place of the port's, as they come.
+static void SourceLoop()
+{
+    SetStatus(GPS_OPEN, s_cfgApp, 0);
+    s_lineLen = 0;
+    while (!s_stop && !s_reopen && !s_scanReq) {
+        char buf[1024];
+        int got = s_cfg.source(buf, sizeof(buf));
+        if (got > 0) {
+            EnterCriticalSection(&s_cs);
+            s_state.bytes += got;
+            LeaveCriticalSection(&s_cs);
+            if (s_cfg.onRaw)
+                s_cfg.onRaw(buf, got);
+            Feed(buf, got);
+        }
+        WaitForSingleObject(s_wake, 100);
+    }
+}
+
 // This program reads the port (it holds the mutex): the old single-program loop, publishing as it goes.
 static void ReadPortLoop()
 {
     DWORD lastErr = 0xFFFFFFFF;
-    while (!s_stop) {
+    while (!s_stop && !YieldAsked()) {
+        if (s_cfg.source) {
+            s_scanReq = false;   // (nothing to scan)
+            SourceLoop();
+            continue;
+        }
         if (s_scanReq) {
             s_scanReq = false;
             Scan();
@@ -476,7 +508,7 @@ static void ReadPortLoop()
         SetStatus(GPS_OPEN, port, baud);
         s_lineLen = 0;
         DWORD lastData = GetTickCount();
-        while (!s_stop && !s_reopen && !s_scanReq) {
+        while (!s_stop && !s_reopen && !s_scanReq && !YieldAsked()) {
             char buf[2048];
             int got = ReadAvailable(h, buf, sizeof(buf), 1000);
             if (got < 0) {
@@ -523,7 +555,7 @@ static bool FollowLoop()
     LONG seenLines = s_shm ? s_shm->lineSeq : 0;
     bool logged = false;
     while (!s_stop) {
-        DWORD w = WaitForSingleObject(s_mutex, 0);
+        DWORD w = YieldAsked() ? WAIT_TIMEOUT : WaitForSingleObject(s_mutex, 0);   // (a taker waits for it)
         if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED)
             return true;   // the reader is gone: this program takes the port (the mutex is held now)
         if (s_shm && s_shm->magic == VGPS_MAGIC) {
@@ -577,8 +609,17 @@ static DWORD WINAPI GpsThread(LPVOID)
 {
     Logf("gps: thread id %08X", (unsigned)GetCurrentThreadId());
     while (!s_stop) {
-        // no mutex (could not be created): read the port alone, as before
-        DWORD w = s_mutex ? WaitForSingleObject(s_mutex, 0) : WAIT_OBJECT_0;
+        // no mutex (could not be created): read the port alone, as before. Taking it over: the reader asked to give
+        // it up and waited for (ReleaseMutex hands it to a waiting thread, before the old reader can take it again)
+        DWORD w = WAIT_OBJECT_0;
+        if (s_mutex && s_cfg.takeOver && s_yield) {
+            SetEvent(s_yield);
+            w = WaitForSingleObject(s_mutex, 10000);
+            ResetEvent(s_yield);
+            Logf("gps: port %s", w == WAIT_OBJECT_0 || w == WAIT_ABANDONED ? "taken over" : "not given up in 10 s");
+        } else if (s_mutex) {
+            w = WaitForSingleObject(s_mutex, 0);
+        }
         if (w != WAIT_OBJECT_0 && w != WAIT_ABANDONED && !FollowLoop())
             break;   // stopping, the mutex was never taken
         if (s_stop) {
@@ -622,6 +663,7 @@ void GpsStart(const GpsConfig* cfg)
     wcscpy(s_port, s_cfgPort);
     s_baud = cfg->baud;
     s_mutex = CreateMutex(NULL, FALSE, VGPS_MUTEX);
+    s_yield = CreateEvent(NULL, TRUE, FALSE, VGPS_YIELD);   // (manual reset: every reader sees it)
     s_shmMap = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(GpsShm), VGPS_SHM_NAME);
     if (s_shmMap)
         s_shm = (GpsShm*)MapViewOfFile(s_shmMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(GpsShm));
@@ -646,6 +688,9 @@ void GpsStop()
         CloseHandle(s_shmMap);
     if (s_mutex)
         CloseHandle(s_mutex);
+    if (s_yield)
+        CloseHandle(s_yield);
+    s_yield = NULL;
     s_shm = NULL;
 }
 
