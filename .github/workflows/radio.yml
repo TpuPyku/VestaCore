@@ -1,0 +1,30 @@
+# The internet radio's catalogue mirrored (tools/make_radio_mirror.py; the user 2026-11-12: radio-browser.info is
+# blocked for many, the stations play from their own addresses): one file into the release "radio" (a pre-release,
+# its asset replaced each week) - VestaHome downloads it and answers from it when radio-browser does not.
+name: radio
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'   # Mondays 03:00 UTC
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python tools/test_radio_mirror.py
+      - run: mkdir -p out && python tools/make_radio_mirror.py out/radio-mirror.bin
+      - name: The release (once)
+        run: |
+          gh release view radio >/dev/null 2>&1 || gh release create radio --prerelease --title "Каталог интернет-радио" \
+            --notes "Зеркало каталога radio-browser.info для VestaHome (обновляется раз в неделю). Данные: radio-browser.info."
+      - run: gh release upload radio out/radio-mirror.bin --clobber
