@@ -6,53 +6,26 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include "vhap.h"   // VestaCore: VhapAddon (VestaHome found, hello, its commands, bye), VhapSend, VhapField
+enum { kFindMs = 3000 };
 
-#define VHAP_MAGIC 0x56484150   // 'VHAP'
-static const wchar_t* kId = L"Sample";   // = its folder's name in Plugins
-enum { TIMER_FIND = 1, kFindMs = 3000 };
-
-static HWND s_self, s_vh, s_own;   // our (hidden) window, VestaHome's, our own screen's window
+static void Receive(const wchar_t* cmd);
+static VhapAddon s_addon = { NULL, NULL, L"id=Sample\tname=Пример\tver=1.0", Receive };   // id = its folder's name
+static HWND s_own;   // our own screen's window
 static int  s_count, s_step = 1, s_mode, s_speed = -1;
 static bool s_light, s_night;
 
-static void Send(const wchar_t* fmt, ...)   // one command: "verb\tkey=value..."
+static void Send(const wchar_t* fmt, ...)   // one command to VestaHome: "verb\tkey=value..."
 {
-    if (!s_vh || !IsWindow(s_vh)) {
-        s_vh = NULL;
-        return;
-    }
-    wchar_t s[512];
     va_list a;
     va_start(a, fmt);
-    int n = _vsnwprintf(s, 511, fmt, a);
+    VhapSendV(s_addon.vh, s_addon.self, fmt, a);
     va_end(a);
-    s[511] = 0;
-    if (n < 0)
-        n = (int)wcslen(s);
-    COPYDATASTRUCT c;
-    c.dwData = VHAP_MAGIC;
-    c.cbData = n * sizeof(wchar_t);
-    c.lpData = s;
-    SendMessage(s_vh, WM_COPYDATA, (WPARAM)s_self, (LPARAM)&c);
 }
 
 static bool Field(const wchar_t* cmd, const wchar_t* key, wchar_t* out, int cap)
 {
-    out[0] = 0;
-    int kl = (int)wcslen(key);
-    for (const wchar_t* p = wcschr(cmd, L'\t'); p; p = wcschr(p + 1, L'\t')) {
-        if (wcsncmp(p + 1, key, kl) || p[1 + kl] != L'=')
-            continue;
-        const wchar_t* v = p + 2 + kl;
-        int n = 0;
-        while (v[n] && v[n] != L'\t' && n < cap - 1) {
-            out[n] = v[n];
-            n++;
-        }
-        out[n] = 0;
-        return true;
-    }
-    return false;
+    return VhapField(cmd, key, out, cap);
 }
 
 static void Values()   // the values that change: on the screen and on the widget
@@ -89,20 +62,13 @@ static void Declare()   // after "welcome": the widget and the screens
     Values();
 }
 
-static void Hello()   // VestaHome found (again): who we are
-{
-    s_vh = FindWindow(L"VestaHome_Wnd", NULL);
-    if (s_vh)
-        Send(L"hello\tid=%s\tname=Пример\tver=1.0\tapi=1\thwnd=%08X", kId, (unsigned)(UINT_PTR)s_self);
-}
-
 static void Receive(const wchar_t* cmd)
 {
     wchar_t id[32], v[32];
     if (!wcsncmp(cmd, L"welcome", 7)) {
         Declare();
     } else if (!wcsncmp(cmd, L"quit", 4)) {
-        DestroyWindow(s_self);
+        DestroyWindow(s_addon.self);
     } else if (!wcsncmp(cmd, L"event", 5)) {
         Field(cmd, L"id", id, 32);
         Field(cmd, L"value", v, 32);
@@ -135,28 +101,8 @@ static void Receive(const wchar_t* cmd)
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    switch (msg) {
-    case WM_COPYDATA: {
-        const COPYDATASTRUCT* c = (const COPYDATASTRUCT*)lp;
-        if (!c || c->dwData != VHAP_MAGIC || !c->lpData)
-            return FALSE;
-        wchar_t cmd[512];
-        int n = (int)(c->cbData / sizeof(wchar_t));
-        n = n > 511 ? 511 : n;
-        memcpy(cmd, c->lpData, n * sizeof(wchar_t));
-        cmd[n] = 0;
-        Receive(cmd);
-        return TRUE;
-    }
-    case WM_TIMER:   // VestaHome not there yet, or restarted: say hello again
-        if (!s_vh || !IsWindow(s_vh))
-            Hello();
-        return 0;
-    case WM_DESTROY:
-        Send(L"bye");
-        PostQuitMessage(0);
-        return 0;
-    }
+    if (VhapAddonMsg(&s_addon, msg, wp, lp))   // its commands to Receive, hello again when VestaHome restarted, bye
+        return msg == WM_COPYDATA;
     return DefWindowProc(hwnd, msg, wp, lp);
 }
 
@@ -203,15 +149,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int)
     wc.hInstance = inst;
     wc.lpszClassName = L"VHSample_Wnd";
     RegisterClass(&wc);
-    s_self = CreateWindow(L"VHSample_Wnd", L"VestaHome sample add-on", WS_POPUP, 0, 0, 1, 1, NULL, NULL, inst, NULL);
-    if (!s_self)
+    s_addon.self = CreateWindow(L"VHSample_Wnd", L"VestaHome sample add-on", WS_POPUP, 0, 0, 1, 1, NULL, NULL, inst,
+                                NULL);
+    if (!s_addon.self)
         return 1;
     wc.lpfnWndProc = OwnProc;   // the own screen's window: hidden until VestaHome shows it
     wc.lpszClassName = L"VHSampleOwn_Wnd";
     RegisterClass(&wc);
     s_own = CreateWindow(L"VHSampleOwn_Wnd", L"Sample own screen", WS_POPUP, 0, 0, 800, 480, NULL, NULL, inst, NULL);
-    Hello();
-    SetTimer(s_self, TIMER_FIND, kFindMs, NULL);
+    VhapHello(&s_addon);
+    SetTimer(s_addon.self, VHAP_TIMER_FIND, kFindMs, NULL);
     MSG m;
     while (GetMessage(&m, NULL, 0, 0)) {
         TranslateMessage(&m);

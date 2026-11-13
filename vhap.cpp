@@ -46,3 +46,45 @@ bool VhapField(const wchar_t* cmd, const wchar_t* key, wchar_t* out, int cap)
     }
     return false;
 }
+
+bool VhapCommand(LPARAM lp, wchar_t* out, int cap)
+{
+    const COPYDATASTRUCT* c = (const COPYDATASTRUCT*)lp;
+    if (!c || c->dwData != VHAP_MAGIC || !c->lpData)
+        return false;
+    int n = (int)(c->cbData / sizeof(wchar_t));
+    n = n > cap - 1 ? cap - 1 : n;
+    memcpy(out, c->lpData, n * sizeof(wchar_t));
+    out[n] = 0;
+    return true;
+}
+
+void VhapHello(VhapAddon* a)
+{
+    a->vh = FindWindow(L"VestaHome_Wnd", NULL);
+    if (a->vh)
+        VhapSend(a->vh, a->self, L"hello\t%s\tapi=1\thwnd=%08X", a->hello, (unsigned)(UINT_PTR)a->self);
+}
+
+bool VhapAddonMsg(VhapAddon* a, UINT msg, WPARAM wp, LPARAM lp)
+{
+    wchar_t cmd[512];
+    switch (msg) {
+    case WM_COPYDATA:
+        if (!VhapCommand(lp, cmd, 512))
+            return false;
+        a->on(cmd);
+        return true;
+    case WM_TIMER:
+        if (wp != VHAP_TIMER_FIND)
+            return false;
+        if (!a->vh || !IsWindow(a->vh))
+            VhapHello(a);
+        return true;
+    case WM_DESTROY:
+        VhapSend(a->vh, a->self, L"bye");
+        PostQuitMessage(0);
+        return true;
+    }
+    return false;
+}
