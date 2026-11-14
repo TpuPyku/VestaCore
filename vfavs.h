@@ -19,6 +19,7 @@ int  VFavsAdd(VFavs* f, const wchar_t* name, double lat, double lon);   // its i
                                                                         // -1 none (no name, full)
 int  VFavsRename(VFavs* f, int i, const wchar_t* name);   // its index (names may repeat); -1 not renamed
 void VFavsDel(VFavs* f, int i);
+int  VFavsMove(VFavs* f, int i, int dir);   // dir -1 up, 1 down: its new index; -1 not moved (the end)
 bool VFavsLoad(VFavs* f, const wchar_t* path);   // false: no file (none then)
 bool VFavsSave(const VFavs* f, const wchar_t* path);
 

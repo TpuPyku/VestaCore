@@ -45,6 +45,17 @@ void VFavsDel(VFavs* f, int i)
     f->n--;
 }
 
+int VFavsMove(VFavs* f, int i, int dir)   // the order is VestaHome's widget's (the first ones)
+{
+    int j = i + dir;
+    if (i < 0 || i >= f->n || j < 0 || j >= f->n)
+        return -1;
+    VFav t = f->f[i];
+    f->f[i] = f->f[j];
+    f->f[j] = t;
+    return j;
+}
+
 static int SignOf(const char* tab)   // the sign's column ("<TAB>n"); none or bad: the star
 {
     if (!tab)

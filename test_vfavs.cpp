@@ -94,6 +94,20 @@ int main()
     Check(VFavsLoad(&g, path) && g.n == 6 && g.f[0].icon == VFAV_STAR && g.f[1].icon == 4 && g.f[2].icon ==
           VFAV_STAR && g.f[3].icon == VFAV_STAR && g.f[4].icon == VFAV_ICONS - 1 && g.f[5].icon == VFAV_STAR,
           "favs: an older file (no sign) - the star; a bad sign - the star; a name too long - left out");
+
+    // the order (the user 2026-11-14: up and down in the settings; VestaHome's widget takes the first ones)
+    VFavsClear(&f);
+    VFavsAdd(&f, L"A", 1, 1);
+    VFavsAdd(&f, L"B", 2, 2);
+    VFavsAdd(&f, L"C", 3, 3);
+    f.f[1].icon = VFAV_HOME;
+    Check(VFavsMove(&f, 1, -1) == 0 && !wcscmp(f.f[0].name, L"B") && f.f[0].icon == VFAV_HOME && Near(f.f[0].lat, 2) &&
+          !wcscmp(f.f[1].name, L"A") && Near(f.f[1].lat, 1) && f.n == 3, "favs: moved up, its place and sign with it");
+    Check(VFavsMove(&f, 1, 1) == 2 && !wcscmp(f.f[2].name, L"A") && !wcscmp(f.f[1].name, L"C"), "favs: moved down");
+    Check(VFavsMove(&f, 0, -1) == -1 && VFavsMove(&f, 2, 1) == -1 && VFavsMove(&f, -1, 1) == -1 &&
+          VFavsMove(&f, 3, -1) == -1 && !wcscmp(f.f[0].name, L"B") && !wcscmp(f.f[1].name, L"C") &&
+          !wcscmp(f.f[2].name, L"A"), "favs: the first up, the last down, no such - not moved");
+    Check(VFavsMove(&f, 0, 1) == 1 && !wcscmp(f.f[0].name, L"C") && !wcscmp(f.f[1].name, L"B"), "favs: the first down");
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
