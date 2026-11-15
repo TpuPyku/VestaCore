@@ -1,6 +1,8 @@
 // vlicense.cpp - VestaHome's support license (vlicense.h): the unit's ID text, the license file checked by BearSSL.
 #include "vlicense.h"
+#include <windows.h>
 #include <string.h>
+#include <stdlib.h>
 #include <bearssl.h>
 
 #include "vlicense_key.inc"
@@ -106,4 +108,84 @@ bool LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned 
 bool LicenseValid(const char* text, int len, const wchar_t* id)
 {
     return LicenseVerify(text, len, id, kLicensePub, sizeof(kLicensePub));
+}
+
+bool LicenseFileVerify(const wchar_t* path, const wchar_t* id, const unsigned char* pub, int publen, bool* found)
+{
+    char text[1024];
+    DWORD got = 0;
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (found)
+        *found = f != INVALID_HANDLE_VALUE;
+    if (f == INVALID_HANDLE_VALUE)
+        return false;
+    ReadFile(f, text, sizeof(text), &got, NULL);
+    CloseHandle(f);
+    return LicenseVerify(text, (int)got, id, pub, publen);
+}
+
+bool LicenseFileValid(const wchar_t* path, const wchar_t* id, bool* found)
+{
+    return LicenseFileVerify(path, id, kLicensePub, sizeof(kLicensePub), found);
+}
+
+#ifdef UNDER_CE
+extern "C" BOOL KernelIoControl(DWORD code, LPVOID in, DWORD inSize, LPVOID out, DWORD outSize, LPDWORD ret);
+
+static int MacBytes(unsigned char* buf, int cap)   // the adapters' MAC addresses, one after another
+{
+    struct IpAddr { void* next; char ip[16]; char mask[16]; DWORD ctx; };
+    struct Adapter { Adapter* next; DWORD combo; char name[260]; char descr[132]; UINT alen; BYTE addr[8]; };
+    typedef DWORD (WINAPI *AdaptersFn)(void*, ULONG*);
+    HMODULE ip = LoadLibrary(L"iphlpapi.dll");
+    AdaptersFn f = ip ? (AdaptersFn)GetProcAddress(ip, L"GetAdaptersInfo") : NULL;
+    ULONG size = 0;
+    int n = 0;
+    if (f)
+        f(NULL, &size);
+    if (f && size && size < 64 * 1024) {
+        Adapter* a = (Adapter*)malloc(size);
+        if (a && f(a, &size) == 0)
+            for (Adapter* p = a; p && n + 8 <= cap; p = p->next)
+                if (p->alen >= 6 && p->alen <= 8) {
+                    memcpy(buf + n, p->addr, p->alen);
+                    n += p->alen;
+                }
+        free(a);
+    }
+    return n;
+}
+#endif
+
+int LicenseUnitBytes(unsigned char* buf, int cap, int* source)
+{
+    int n, src;
+#ifdef UNDER_CE
+    const DWORD IOCTL_HAL_GET_DEVICEID = 0x01010054;   // CTL_CODE(FILE_DEVICE_HAL, 21, METHOD_BUFFERED, 0)
+    DWORD got = 0;
+    memset(buf, 0, cap);
+    *(DWORD*)buf = cap;   // DEVICE_ID.dwSize
+    if (KernelIoControl(IOCTL_HAL_GET_DEVICEID, NULL, 0, buf, cap, &got) && got > 20) {
+        n = (int)got;
+        src = LICENSE_SRC_HAL;
+    } else {
+        n = MacBytes(buf, cap);
+        src = n ? LICENSE_SRC_MAC : LICENSE_SRC_NONE;
+    }
+#else
+    DWORD serial = 0;   // PC test build: the system volume's serial number
+    GetVolumeInformationW(L"C:\\", NULL, 0, &serial, NULL, NULL, NULL, 0);
+    memcpy(buf, &serial, 4);
+    n = 4;
+    src = LICENSE_SRC_PC;
+#endif
+    if (source)
+        *source = src;
+    return n;
+}
+
+void LicenseUnitId(wchar_t* out)
+{
+    unsigned char hw[LICENSE_UNIT_MAX];
+    LicenseIdText(hw, LicenseUnitBytes(hw, sizeof(hw), NULL), out);
 }

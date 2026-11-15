@@ -1,6 +1,7 @@
 // test_vlicense.cpp - vlicense.cpp on the PC: the unit's ID text, a license file checked against a test key
 // (tools/testdata/license_test_priv.pem - for these tests only; its files made with tools/make_license.py sign).
 #include "vlicense.h"
+#include <windows.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -70,10 +71,48 @@ static void TestFile()
           "only the given length read (the signature cut off): not valid");
 }
 
+static void TestUnit()   // (the PC: the system volume's serial number; the unit: its HAL device id, else MACs)
+{
+    unsigned char a[64], b[64];
+    int source = -1;
+    int n = LicenseUnitBytes(a, sizeof(a), &source);
+    Check(n == 4 && source == LICENSE_SRC_PC && LicenseUnitBytes(b, sizeof(b), NULL) == 4 && !memcmp(a, b, 4),
+          "the unit's bytes: the same each time, their source told");
+    wchar_t id[LICENSE_ID_LEN], same[LICENSE_ID_LEN];
+    LicenseIdText(a, n, same);
+    LicenseUnitId(id);
+    Check(!wcscmp(id, same) && !wcsncmp(id, L"VH-", 3), "this unit's ID: the text of its bytes");
+}
+
+static void TestPath()   // a license file read from its path (VestaHome's folder; VestaAuto reads it itself)
+{
+    wchar_t dir[MAX_PATH], path[MAX_PATH];
+    GetTempPathW(MAX_PATH, dir);
+    _snwprintf(path, MAX_PATH, L"%svlicense_test.key", dir);
+    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    DWORD put;
+    WriteFile(f, kFile, (DWORD)strlen(kFile), &put, NULL);
+    CloseHandle(f);
+    bool found = false;
+    Check(LicenseFileVerify(path, L"VH-ABCDE-FGH12", kTestPub, sizeof(kTestPub), &found) && found,
+          "the file at its path: found, valid");
+    found = true;
+    Check(!LicenseFileVerify(path, L"VH-ABCDE-FGH13", kTestPub, sizeof(kTestPub), &found) && found,
+          "found, another unit's: not valid");
+    Check(!LicenseFileValid(path, L"VH-ABCDE-FGH12", &found) && found, "the real key: the test file not valid");
+    DeleteFileW(path);
+    found = true;
+    Check(!LicenseFileVerify(path, L"VH-ABCDE-FGH12", kTestPub, sizeof(kTestPub), &found) && !found,
+          "no file: not valid, not found");
+    Check(!LicenseFileValid(path, L"VH-ABCDE-FGH12", NULL), "no file, no `found` asked: not valid");
+}
+
 int main()
 {
     TestId();
     TestFile();
+    TestUnit();
+    TestPath();
     printf("test_vlicense: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
