@@ -74,6 +74,12 @@ API — `vnav.h`. Проверка — `test_vnav.bat`.
 - `VFontMake(face, height, weight)`: шрифт без сглаживания (на ГУ сглаживание становится ClearType — цветная
   кайма в 16-битном кадре). Проверка — `test_vfont.bat`.
 
+### `vlicense` — лицензия поддержки VestaHome
+- `LicenseIdText` — ID ГУ для пользователя (`VH-XXXXX-XXXXX`, SHA-256 аппаратного ID, 50 бит); `LicenseValid` —
+  файл `VestaLicense.key` (подпись ECDSA P-256 автора по ID) проверяется без сети, открытый ключ — `vlicense_key.inc`.
+  Без лицензии ничего не закрыто: только заставка поддержки в Android Auto. Ключи и файлы — `tools/make_license.py`
+  (закрытый ключ — только у автора, не в репозитории; `tools/testdata/` — тестовый ключ). Проверка — `test_vlicense.bat`.
+
 ### `vjson` — JSON на месте, без дерева
 - `JKey`, `JFirst` / `JNext`, `JNum`, `JStr` (UTF-8, `\uXXXX`), `JWide`, `JSkip`; `UrlEncode`. Ответы OSRM, Photon,
   каталог регионов OSMapsCE, каталог радиостанций VestaHome. Проверка — `test_vjson.bat`.
