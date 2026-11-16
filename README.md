@@ -80,6 +80,12 @@ API — `vnav.h`. Проверка — `test_vnav.bat`.
   Без лицензии ничего не закрыто: только заставка поддержки в Android Auto. Ключи и файлы — `tools/make_license.py`
   (закрытый ключ — только у автора, не в репозитории; `tools/testdata/` — тестовый ключ). Проверка — `test_vlicense.bat`.
 
+### `vsecret` — секреты настроек
+- `SecretSeal` / `SecretOpen` (текст `v1:` + hex), `SecretSealBytes` / `SecretOpenBytes`: ChaCha20 + HMAC-SHA-256
+  (BearSSL), ключ — SHA-256 байт этой ГУ (`vlicense` `LicenseUnitBytes`), так что файл настроек, прочитанный на другой
+  ГУ или ПК, пароль не выдаёт. До 127 байт UTF-8. Пароли Wi-Fi VestaHome, пароль брокера VestaSmartHome, кэш
+  телефонной книги. Проверка — `test_vsecret.bat`.
+
 ### `vjson` — JSON на месте, без дерева
 - `JKey`, `JFirst` / `JNext`, `JNum`, `JStr` (UTF-8, `\uXXXX`), `JWide`, `JSkip`; `UrlEncode`. Ответы OSRM, Photon,
   каталог регионов OSMapsCE, каталог радиостанций VestaHome. Проверка — `test_vjson.bat`.
