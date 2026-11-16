@@ -24,16 +24,22 @@ static const int kConnectTimeoutSec = 10;
 static const int kReadTimeoutSec    = 15;
 static const int kMaxConns          = 3;
 
-struct Conn {
-    char                    host[64];
-    bool                    https;
+struct NetStream {   // a socket, plain or TLS: the pool's connections, the streams, MQTT (vhttp.h)
     SOCKET                  s;
-    bool                    open;
-    DWORD                   lastUse;
+    bool                    tls;
+    volatile bool           aborted;
     br_ssl_client_context   sc;
     br_x509_minimal_context xc;
     br_sslio_context        ioc;
+    br_x509_trust_anchor    own;   // the caller's root (NetCa)
     unsigned char           iobuf[BR_SSL_BUFSIZE_BIDI];
+};
+
+struct Conn {
+    char                    host[64];
+    NetStream               net;           // its socket and TLS (net.tls: https)
+    bool                    open;
+    DWORD                   lastUse;
     bool                    tlsReady;      // context initialized: next reset may resume the session
     bool                    busy;          // a thread's request on it now
     bool                    spare;         // none free in the pool: its own, closed and freed after
@@ -264,7 +270,7 @@ static void EnsureTrustAnchors()
 static void CloseConn(Conn* c)
 {
     if (c->open)
-        closesocket(c->s);
+        closesocket(c->net.s);
     c->open = false;
 }
 
@@ -283,7 +289,7 @@ static Conn* PickConn(const char* host, bool https)
         }
         if (c->busy)
             continue;
-        if (!strcmp(c->host, host) && c->https == https)
+        if (!strcmp(c->host, host) && c->net.tls == https)
             return c;
         if (!oldest || c->lastUse < oldest->lastUse)
             oldest = c;
@@ -304,7 +310,7 @@ static Conn* PickConn(const char* host, bool https)
     }
     strncpy(c->host, host, sizeof(c->host) - 1);
     c->host[sizeof(c->host) - 1] = 0;
-    c->https = https;
+    c->net.tls = https;
     return c;
 }
 
@@ -333,47 +339,60 @@ static void ReleaseConn(Conn* c)
 
 static int OpenConn(Conn* c)
 {
-    int err = Connect(c->host, c->https ? 443 : 80, &c->s);
+    int err = Connect(c->host, c->net.tls ? 443 : 80, &c->net.s);
     if (err != NET_OK)
         return err;
     c->open = true;
-    if (!c->https)
+    if (!c->net.tls)
         return NET_OK;
 
     bool resume = c->tlsReady;
     if (!c->tlsReady) {
         EnsureTrustAnchors();
-        br_ssl_client_init_full(&c->sc, &c->xc, s_tas, TA_COUNT);
-        br_ssl_engine_set_buffer(&c->sc.eng, c->iobuf, sizeof(c->iobuf), 1);
+        br_ssl_client_init_full(&c->net.sc, &c->net.xc, s_tas, TA_COUNT);
+        br_ssl_engine_set_buffer(&c->net.sc.eng, c->net.iobuf, sizeof(c->net.iobuf), 1);
         c->tlsReady = true;
     }
     unsigned long days, secs;
     ValidationTime(&days, &secs);
-    br_x509_minimal_set_time(&c->xc, days, secs);
-    InjectEntropy(&c->sc.eng);
-    if (!br_ssl_client_reset(&c->sc, c->host, resume ? 1 : 0)) {
-        Log("http: TLS reset failed (%d)", br_ssl_engine_last_error(&c->sc.eng));
+    br_x509_minimal_set_time(&c->net.xc, days, secs);
+    InjectEntropy(&c->net.sc.eng);
+    if (!br_ssl_client_reset(&c->net.sc, c->host, resume ? 1 : 0)) {
+        Log("http: TLS reset failed (%d)", br_ssl_engine_last_error(&c->net.sc.eng));
         CloseConn(c);
         return NET_TLS;
     }
-    br_sslio_init(&c->ioc, &c->sc.eng, SockRead, &c->s, SockWrite, &c->s);
+    br_sslio_init(&c->net.ioc, &c->net.sc.eng, SockRead, &c->net.s, SockWrite, &c->net.s);
     return NET_OK;
 }
 
-static int ConnWrite(Conn* c, const char* data, int len)
+// A socket's bytes, through TLS when tls is given (the pooled connections and the streams alike).
+static int IoWrite(SOCKET* s, br_sslio_context* tls, const void* data, int len)   // 0: all sent
 {
-    if (!c->https)
-        return send(c->s, data, len, 0) == len ? 0 : -1;
-    if (br_sslio_write_all(&c->ioc, data, len) < 0 || br_sslio_flush(&c->ioc) < 0)
-        return -1;
+    if (tls)
+        return br_sslio_write_all(tls, data, len) >= 0 && br_sslio_flush(tls) >= 0 ? 0 : -1;
+    for (int sent = 0; sent < len;) {
+        int k = SockWrite(s, (const unsigned char*)data + sent, len - sent);
+        if (k < 0)
+            return -1;
+        sent += k;
+    }
     return 0;
 }
 
-static int ConnRead(Conn* c, char* buf, int len)
+static int IoRead(SOCKET* s, br_sslio_context* tls, char* buf, int len)
 {
-    if (!c->https)
-        return SockRead(&c->s, (unsigned char*)buf, len);
-    return br_sslio_read(&c->ioc, buf, len);
+    return tls ? br_sslio_read(tls, buf, len) : SockRead(s, (unsigned char*)buf, len);
+}
+
+static int NetRaw(NetStream* n, char* buf, int len)
+{
+    return n->aborted ? -1 : IoRead(&n->s, n->tls ? &n->ioc : NULL, buf, len);
+}
+
+int NetWrite(NetStream* n, const void* data, int len)
+{
+    return n->aborted ? -1 : IoWrite(&n->s, n->tls ? &n->ioc : NULL, data, len);
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -388,7 +407,7 @@ struct Reader {
 static int ReadByte(Reader* r)
 {
     if (r->pos == r->end) {
-        int n = ConnRead(r->c, r->buf, sizeof(r->buf));
+        int n = NetRaw(&r->c->net, r->buf, sizeof(r->buf));
         if (n <= 0)
             return -1;
         r->pos = 0;
@@ -417,7 +436,7 @@ static bool ReadBytes(Reader* r, char* out, int len)
 {
     while (len > 0) {
         if (r->pos == r->end) {
-            int n = ConnRead(r->c, r->buf, sizeof(r->buf));
+            int n = NetRaw(&r->c->net, r->buf, sizeof(r->buf));
             if (n <= 0)
                 return false;
             r->pos = 0;
@@ -465,7 +484,7 @@ static int Request(Conn* c, const char* path, const char* ifNoneMatch, const Htt
     int n = _snprintf(req, cap,
         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: %s\r\n%s%sConnection: keep-alive\r\n\r\n",
         path, c->host, s_setup.userAgent, s_setup.accept, cond, more);
-    int err = n < 0 || ConnWrite(c, req, n) < 0 ? NET_CONNECT : NET_OK;
+    int err = n < 0 || NetWrite(&c->net, req, n) < 0 ? NET_CONNECT : NET_OK;
     free(req);
     return err;
 }
@@ -577,7 +596,7 @@ static int Exchange(Conn* c, const char* path, const char* ifNoneMatch, unsigned
                 r->pos = r->end;
                 continue;
             }
-            k = ConnRead(c, body + len, 4096);
+            k = NetRaw(&c->net, body + len, 4096);
             if (k <= 0)
                 break;
             len += k;
@@ -616,8 +635,8 @@ static int Fetch(Conn* c, const char* host, const char* path, unsigned char** bo
         c->lastUse = GetTickCount();
         if (err == NET_OK)
             return NET_OK;
-        if (c->https && !answered) {
-            int tls = br_ssl_engine_last_error(&c->sc.eng);
+        if (c->net.tls && !answered) {
+            int tls = br_ssl_engine_last_error(&c->net.sc.eng);
             if (tls != BR_ERR_OK && tls != BR_ERR_IO) {
                 Log("http: TLS error %d with %s", tls, host);
                 CloseConn(c);
@@ -626,7 +645,7 @@ static int Fetch(Conn* c, const char* host, const char* path, unsigned char** bo
             }
         }
         if (!answered)   // (the user's log 2026-10-30: the catalog "HTTP 0" with nothing about it)
-            Log("http: %s: no answer (%d, TLS %d, %s)", host, err, c->https ? br_ssl_engine_last_error(&c->sc.eng) : 0,
+            Log("http: %s: no answer (%d, TLS %d, %s)", host, err, c->net.tls ? br_ssl_engine_last_error(&c->net.sc.eng) : 0,
                 reused ? "kept" : "new");
         if (!reused || answered)
             return err;
@@ -665,16 +684,64 @@ void HttpCloseAll()
 // thread shuts the socket down and the read returns.
 
 struct HttpStream {
-    SOCKET                  s;
-    bool                    https;
-    volatile bool           aborted;
-    br_ssl_client_context   sc;
-    br_x509_minimal_context xc;
-    br_sslio_context        ioc;
-    unsigned char           iobuf[BR_SSL_BUFSIZE_BIDI];
-    char                    buf[4096];   // what came with the headers
-    int                     pos, end;
+    NetStream net;
+    char      buf[4096];   // what came with the headers
+    int       pos, end;
 };
+
+static void OwnAnchor(br_x509_trust_anchor* a, const NetCa* ca)
+{
+    memset(a, 0, sizeof(*a));
+    a->dn.data = (unsigned char*)ca->dn;
+    a->dn.len = ca->dnLen;
+    a->flags = BR_X509_TA_CA;
+    a->pkey.key_type = BR_KEYTYPE_EC;
+    a->pkey.key.ec.curve = BR_EC_secp256r1;
+    a->pkey.key.ec.q = (unsigned char*)ca->q;
+    a->pkey.key.ec.qlen = ca->qLen;
+}
+
+// The socket, and TLS set up (its handshake comes with the first write or read).
+static int NetStart(NetStream* n, const char* host, int port, bool tls, const NetCa* ca)
+{
+    n->tls = tls;
+    int err = Connect(host, port, &n->s);
+    if (err != NET_OK) {
+        n->s = INVALID_SOCKET;
+        return err;
+    }
+    if (!tls)
+        return NET_OK;
+    const br_x509_trust_anchor* tas = s_tas;
+    size_t count = TA_COUNT;
+    if (ca) {
+        OwnAnchor(&n->own, ca);
+        tas = &n->own;
+        count = 1;
+    } else {
+        EnsureTrustAnchors();
+    }
+    br_ssl_client_init_full(&n->sc, &n->xc, tas, count);
+    br_ssl_engine_set_buffer(&n->sc.eng, n->iobuf, sizeof(n->iobuf), 1);
+    unsigned long days, secs;
+    ValidationTime(&days, &secs);
+    br_x509_minimal_set_time(&n->xc, days, secs);
+    InjectEntropy(&n->sc.eng);
+    bool byAddress = ca && inet_addr(host) != INADDR_NONE;   // (the own CA's server by its IP: not name-checked)
+    if (!br_ssl_client_reset(&n->sc, byAddress ? NULL : host, 0))
+        return NET_TLS;
+    br_sslio_init(&n->ioc, &n->sc.eng, SockRead, &n->s, SockWrite, &n->s);
+    return NET_OK;
+}
+
+static int NetTlsError(NetStream* n, int otherwise)
+{
+    if (!n->tls)
+        return otherwise;
+    int tls = br_ssl_engine_last_error(&n->sc.eng);
+    return tls != BR_ERR_OK && tls != BR_ERR_IO ? NET_TLS : otherwise;
+}
+
 
 // "http(s)://host[:port]/path" -> its parts; false if it is not such a URL.
 static bool SplitUrl(const char* url, bool* https, char* host, int hostCap, int* port, char* path, int pathCap)
@@ -705,21 +772,12 @@ static bool SplitUrl(const char* url, bool* https, char* host, int hostCap, int*
     return true;
 }
 
-static int StreamRaw(HttpStream* st, char* buf, int len)
-{
-    if (st->aborted)
-        return -1;
-    if (!st->https)
-        return SockRead(&st->s, (unsigned char*)buf, len);
-    return br_sslio_read(&st->ioc, buf, len);
-}
-
 static bool StreamLine(HttpStream* st, char* line, int max)
 {
     int n = 0;
     for (;;) {
         if (st->pos == st->end) {
-            int k = StreamRaw(st, st->buf, sizeof(st->buf));
+            int k = NetRaw(&st->net, st->buf, sizeof(st->buf));
             if (k <= 0)
                 return false;
             st->pos = 0;
@@ -741,14 +799,6 @@ static void Copy(char* to, int cap, const char* from)
     to[cap - 1] = 0;
 }
 
-static int StreamTlsError(HttpStream* st, int otherwise)
-{
-    if (!st->https)
-        return otherwise;
-    int tls = br_ssl_engine_last_error(&st->sc.eng);
-    return tls != BR_ERR_OK && tls != BR_ERR_IO ? NET_TLS : otherwise;
-}
-
 // One request on a new connection: NET_OK with the headers read (the body comes next), or with a redirect's
 // address in `location` (absolute).
 static int StreamRequest(HttpStream* st, const char* url, char* location, int locCap, int* metaint, char* name,
@@ -760,24 +810,9 @@ static int StreamRequest(HttpStream* st, const char* url, char* location, int lo
     location[0] = 0;
     if (!SplitUrl(url, &https, host, sizeof(host), &port, path, sizeof(path)))
         return NET_HTTP;
-    st->https = https;
-    int err = Connect(host, port, &st->s);
-    if (err != NET_OK) {
-        st->s = INVALID_SOCKET;
+    int err = NetStart(&st->net, host, port, https, NULL);
+    if (err != NET_OK)
         return err;
-    }
-    if (https) {
-        EnsureTrustAnchors();
-        br_ssl_client_init_full(&st->sc, &st->xc, s_tas, TA_COUNT);
-        br_ssl_engine_set_buffer(&st->sc.eng, st->iobuf, sizeof(st->iobuf), 1);
-        unsigned long days, secs;
-        ValidationTime(&days, &secs);
-        br_x509_minimal_set_time(&st->xc, days, secs);
-        InjectEntropy(&st->sc.eng);
-        if (!br_ssl_client_reset(&st->sc, host, 0))
-            return NET_TLS;
-        br_sslio_init(&st->ioc, &st->sc.eng, SockRead, &st->s, SockWrite, &st->s);
-    }
     char hostHdr[140], req[1400];
     if (port == (https ? 443 : 80))
         Copy(hostHdr, sizeof(hostHdr), host);
@@ -788,13 +823,11 @@ static int StreamRequest(HttpStream* st, const char* url, char* location, int lo
                       "Accept: */*\r\nIcy-MetaData: 1\r\nConnection: close\r\n\r\n", path, hostHdr, s_setup.userAgent);
     if (n < 0)
         return NET_HTTP;
-    bool sent = https ? br_sslio_write_all(&st->ioc, req, n) >= 0 && br_sslio_flush(&st->ioc) >= 0
-                      : send(st->s, req, n, 0) == n;
-    if (!sent)
-        return StreamTlsError(st, NET_CONNECT);
+    if (NetWrite(&st->net, req, n) != 0)
+        return NetTlsError(&st->net, NET_CONNECT);
     char line[1024];
     if (!StreamLine(st, line, sizeof(line)))
-        return StreamTlsError(st, NET_TIMEOUT);
+        return NetTlsError(&st->net, NET_TIMEOUT);
     int status;
     if (!strncmp(line, "HTTP/1.", 7) && strlen(line) >= 12)
         status = atoi(line + 9);
@@ -831,10 +864,15 @@ static int StreamRequest(HttpStream* st, const char* url, char* location, int lo
     return status == 200 ? NET_OK : NET_HTTP;
 }
 
+static void NetFree(NetStream* n)   // its socket (the memory is the caller's)
+{
+    if (n->s != INVALID_SOCKET)
+        closesocket(n->s);
+}
+
 static void StreamFree(HttpStream* st)
 {
-    if (st->s != INVALID_SOCKET)
-        closesocket(st->s);
+    NetFree(&st->net);
     free(st);
 }
 
@@ -851,7 +889,7 @@ HttpStream* HttpStreamOpen(const char* url, int* err, int* metaint, char* name, 
             *err = NET_MEMORY;
             return NULL;
         }
-        st->s = INVALID_SOCKET;
+        st->net.s = INVALID_SOCKET;
         *err = StreamRequest(st, cur, next, sizeof(next), metaint, name, nameCap, type, typeCap);
         if (*err == NET_OK && !next[0])
             return st;
@@ -873,17 +911,69 @@ int HttpStreamRead(HttpStream* st, char* buf, int len)
         st->pos += k;
         return k;
     }
-    return StreamRaw(st, buf, len);
+    return NetRaw(&st->net, buf, len);
 }
 
 void HttpStreamAbort(HttpStream* st)
 {
-    st->aborted = true;
-    if (st->s != INVALID_SOCKET)
-        shutdown(st->s, 2);   // SD_BOTH: the blocked recv / select returns
+    NetAbort(&st->net);
 }
 
 void HttpStreamClose(HttpStream* st)
 {
     StreamFree(st);
+}
+
+// ---------------------------------------------------------------- raw streams (MQTT)
+
+NetStream* NetOpen(const char* host, int port, bool tls, const NetCa* ca, int* err)
+{
+    NetStream* n = (NetStream*)calloc(1, sizeof(NetStream));
+    if (!n) {
+        *err = NET_MEMORY;
+        return NULL;
+    }
+    *err = NetStart(n, host, port, tls, ca);
+    if (*err == NET_OK && tls && br_sslio_flush(&n->ioc) < 0)   // the handshake now: a bad certificate shows here
+        *err = NetTlsError(n, NET_CONNECT);
+    if (*err == NET_OK)
+        return n;
+    NetClose(n);
+    return NULL;
+}
+
+static bool Buffered(NetStream* n)   // decrypted bytes already in BearSSL's buffer: no need to wait for the socket
+{
+    return n->tls && (br_ssl_engine_current_state(&n->sc.eng) & BR_SSL_RECVAPP);
+}
+
+int NetRead(NetStream* n, char* buf, int len, int waitMs)
+{
+    if (n->aborted)
+        return -1;
+    if (!Buffered(n)) {   // nothing yet: wait on the socket alone, so a quiet wait does not break the TLS engine
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(n->s, &set);
+        timeval tv;
+        tv.tv_sec = waitMs / 1000;
+        tv.tv_usec = waitMs % 1000 * 1000;
+        int r = select(0, &set, NULL, NULL, &tv);
+        if (r <= 0 || n->aborted)
+            return r == 0 && !n->aborted ? 0 : -1;
+    }
+    return NetRaw(n, buf, len);
+}
+
+void NetAbort(NetStream* n)
+{
+    n->aborted = true;
+    if (n->s != INVALID_SOCKET)
+        shutdown(n->s, 2);   // SD_BOTH: the blocked recv / select returns
+}
+
+void NetClose(NetStream* n)
+{
+    NetFree(n);
+    free(n);
 }

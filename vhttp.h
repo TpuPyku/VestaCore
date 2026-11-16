@@ -35,4 +35,20 @@ int  HttpStreamRead(HttpStream* s, char* buf, int len);   // the body's bytes; <
 void HttpStreamAbort(HttpStream* s);                       // from another thread: the blocked read returns
 void HttpStreamClose(HttpStream* s);
 
+// A raw byte stream (MQTT and the like): TCP, or TLS checked against the built-in roots or, with `ca`, against that
+// root alone (the program's own CA: an EC P-256 key; a server named by its IP address is then not name-checked -
+// BearSSL matches DNS names only, and the own CA signs only its own servers). NULL with *err.
+struct NetCa {
+    const unsigned char* dn;   // the root's subject, DER
+    int dnLen;
+    const unsigned char* q;    // its EC P-256 public point (65 bytes, uncompressed)
+    int qLen;
+};
+struct NetStream;
+NetStream* NetOpen(const char* host, int port, bool tls, const NetCa* ca, int* err);
+int  NetRead(NetStream* n, char* buf, int len, int waitMs);   // bytes; 0: nothing in waitMs; < 0: closed or broken
+int  NetWrite(NetStream* n, const void* data, int len);      // 0: all sent; < 0: broken
+void NetAbort(NetStream* n);                                  // from another thread: a blocked read returns
+void NetClose(NetStream* n);
+
 #endif

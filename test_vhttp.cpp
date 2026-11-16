@@ -126,6 +126,53 @@ static void TestStream()
     HttpStreamClose(s);
 }
 
+static bool AnswerOf(NetStream* n, char* buf, int cap)   // HEAD / sent, the answer's start read
+{
+    static const char req[] = "HEAD / HTTP/1.0\r\nHost: x\r\n\r\n";
+    if (NetWrite(n, req, sizeof(req) - 1) != 0)
+        return false;
+    int k = NetRead(n, buf, cap - 1, 8000);
+    buf[k > 0 ? k : 0] = 0;
+    return k > 0;
+}
+
+static void TestNet()   // a raw stream (MQTT): plain and TLS, waiting without breaking it, the caller's own root
+{
+    int err = -1;
+    char buf[256];
+    NetStream* n = NetOpen("www.google.com", 80, false, NULL, &err);
+    Check(n && err == NET_OK, "net: plain TCP opened");
+    if (n) {
+        Check(NetRead(n, buf, sizeof(buf), 300) == 0, "net: nothing came - 0, not an error");
+        Check(AnswerOf(n, buf, sizeof(buf)) && !strncmp(buf, "HTTP/1.", 7), "net: plain - written, read");
+        NetAbort(n);
+        Check(NetRead(n, buf, sizeof(buf), 300) < 0, "net: aborted - reads nothing");
+        Check(NetWrite(n, "x", 1) < 0, "net: aborted - writes nothing");
+        NetClose(n);
+    }
+    n = NetOpen("yastatic.net", 443, true, NULL, &err);
+    Check(n && err == NET_OK, "net: TLS opened (the built-in roots)");
+    if (n) {
+        Check(NetRead(n, buf, sizeof(buf), 300) == 0, "net: TLS - nothing came yet, still whole");
+        Check(AnswerOf(n, buf, sizeof(buf)) && !strncmp(buf, "HTTP/1.", 7), "net: TLS - written, read after waiting");
+        NetClose(n);
+    }
+    static const unsigned char dn[] = { 0x30, 0x0B, 0x31, 0x09, 0x30, 0x07, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0C, 0x00 };
+    static unsigned char q[65] = { 0x04, 1, 2, 3 };   // (a root no server is signed by)
+    NetCa own = { dn, sizeof(dn), q, sizeof(q) };
+    n = NetOpen("yastatic.net", 443, true, &own, &err);
+    Check(!n && err == NET_TLS, "net: TLS with the caller's own root only - a public server refused");
+    hostent* he = gethostbyname("yastatic.net");   // a public server by its address: its name is still checked
+    if (he) {
+        in_addr a;
+        memcpy(&a, he->h_addr_list[0], 4);
+        n = NetOpen(inet_ntoa(a), 443, true, NULL, &err);
+        Check(!n && err == NET_TLS, "net: the built-in roots by an IP address - the name still checked, refused");
+        if (n)
+            NetClose(n);
+    }
+}
+
 int main()
 {
     WSADATA wsa;
@@ -136,6 +183,7 @@ int main()
     TestHeaders();
     TestThreads();
     TestStream();
+    TestNet();
     HttpCloseAll();
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
