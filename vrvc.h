@@ -1,5 +1,5 @@
 ﻿// The rear view camera as the stock shell shows it (CRvcDlg + CSkinRearViewCtrl of G3NavHMI, Ghidra 2026-10-17),
-// for VestaHome without the shell and VestaLaunch over a navigator (moved from VestaHome 2026-11-17): the reverse
+// for VestaHome without the shell (VestaLaunch: the reverse only; moved from VestaHome 2026-11-17): the reverse
 // gear from desay_sdk_api.dll (GPIO 0x5d), the camera = video
 // input channel 0 shown by the display driver where the screen has the colour key, the guide lines from the
 // maker's RVS_algBackingTrace.dll (its calibration \ResidentFlash\navigation\app\Config\PARAMS.TXT): the
