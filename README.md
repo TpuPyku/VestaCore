@@ -86,6 +86,14 @@ API — `vnav.h`. Проверка — `test_vnav.bat`.
   ГУ или ПК, пароль не выдаёт. До 127 байт UTF-8. Пароли Wi-Fi VestaHome, пароль брокера VestaSmartHome, кэш
   телефонной книги. Проверка — `test_vsecret.bat`.
 
+### `vrvc` — камера заднего хода
+
+Задний ход (`SV_VehicleGetReverseStatus`, GPIO 0x5d: 0 — задний ход), видео камеры под цветовым ключом RGB(1, 1, 0)
+(`SV_Video*` из `desay_sdk_api.dll`), линии разметки из `RVS_algBackingTrace.dll` производителя с его калибровкой;
+всё грузится при запуске, на ПК ничего нет (`RvcReverse` = −1). VestaHome показывает камеру сам (штатной оболочки
+нет), VestaLaunch — поверх навигатора (его окно поверх всех закрывало камеру оболочки). Перенесён из VestaHome
+2026-11-17.
+
 ### `vjson` — JSON на месте, без дерева
 - `JKey`, `JFirst` / `JNext`, `JNum`, `JStr` (UTF-8, `\uXXXX`), `JWide`, `JSkip`; `UrlEncode`. Ответы OSRM, Photon,
   каталог регионов OSMapsCE, каталог радиостанций VestaHome. Проверка — `test_vjson.bat`.
