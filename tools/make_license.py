@@ -2,11 +2,14 @@
 
   keygen <private.pem> <vlicense_key.inc>   a new key pair: the private key (never into a repo - VestaCore is public),
                                             the public one as C bytes for vlicense.cpp
-  sign <private.pem> <VH-XXXXX-XXXXX> <VestaLicense.key>   the license file for one head unit's ID
+  sign <private.pem> <VH-XXXXX-XXXXX> <VestaLicense.key> [level]   the license file for one head unit's ID;
+                                            level 1 (default) - a subscriber: Android Auto's splash gone;
+                                            2 - a co-author (Boosty «Соавторы»): also the smart home add-on
   id <hex of the unit's HAL device id>      the ID VestaHome shows for those bytes (LicenseIdText)
 
-The file: "VestaHome support license", "id=<ID>", "sig=<base64 of r||s>" - ECDSA P-256 over SHA-256 of
-"VestaHome support 1|<ID>". Needs the "cryptography" package.
+The file: "VestaHome support license", "id=<ID>", ["level=<n>" when above 1,] "sig=<base64 of r||s>" - ECDSA P-256
+over SHA-256 of "VestaHome support <level>|<ID>" (the keys made before levels, 2026-11-18, are level 1). Needs the
+"cryptography" package.
 """
 import base64, hashlib, os, sys
 from cryptography.hazmat.primitives import hashes, serialization
@@ -23,15 +26,18 @@ def unit_id(hw):
     return 'VH-%s-%s' % (s[:5], s[5:])
 
 
-def message(uid):
-    return ('VestaHome support 1|' + uid).encode('ascii')
+def message(uid, level=1):
+    return ('VestaHome support %d|%s' % (level, uid)).encode('ascii')
 
 
-def sign(priv_path, uid):
+def sign(priv_path, uid, level=1):
+    if level not in (1, 2):
+        sys.exit('level: 1 (subscriber) or 2 (co-author)')
     key = serialization.load_pem_private_key(open(priv_path, 'rb').read(), password=None)
-    r, s = decode_dss_signature(key.sign(message(uid), ec.ECDSA(hashes.SHA256())))
+    r, s = decode_dss_signature(key.sign(message(uid, level), ec.ECDSA(hashes.SHA256())))
     sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big')
-    return 'VestaHome support license\nid=%s\nsig=%s\n' % (uid, base64.b64encode(sig).decode('ascii'))
+    lvl = 'level=%d\n' % level if level > 1 else ''
+    return 'VestaHome support license\nid=%s\n%ssig=%s\n' % (uid, lvl, base64.b64encode(sig).decode('ascii'))
 
 
 def keygen(priv_path, inc_path):
@@ -56,8 +62,8 @@ def write_inc(pub, inc_path):
 def main(a):
     if len(a) == 3 and a[0] == 'keygen':
         keygen(a[1], a[2])
-    elif len(a) == 4 and a[0] == 'sign':
-        open(a[3], 'w', newline='\n').write(sign(a[1], a[2]))
+    elif len(a) in (4, 5) and a[0] == 'sign':
+        open(a[3], 'w', newline='\n').write(sign(a[1], a[2], int(a[4]) if len(a) == 5 else 1))
     elif len(a) == 2 and a[0] == 'id':
         print(unit_id(bytes.fromhex(a[1])))
     else:

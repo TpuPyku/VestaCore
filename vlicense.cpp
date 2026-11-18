@@ -76,23 +76,33 @@ static int Base64(const char* s, int n, unsigned char* out, int cap)   // the by
     return k;
 }
 
-bool LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned char* pub, int publen)
+static int FileLevel(const char* text, int len)   // "level=1|2"; none - a subscriber; anything else - 0
+{
+    const char* v;
+    int n;
+    if (!Field(text, len, "level=", &v, &n))
+        return LICENSE_SUPPORTER;
+    return n == 1 && (*v == '1' || *v == '2') ? *v - '0' : LICENSE_NONE;
+}
+
+int LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned char* pub, int publen)
 {
     const char *fid, *fsig;
-    int idLen, sigLen;
-    if (!Field(text, len, "id=", &fid, &idLen) || !Field(text, len, "sig=", &fsig, &sigLen) ||
+    int idLen, sigLen, level = FileLevel(text, len);
+    if (!level || !Field(text, len, "id=", &fid, &idLen) || !Field(text, len, "sig=", &fsig, &sigLen) ||
         idLen != LICENSE_ID_LEN - 1)
-        return false;
+        return LICENSE_NONE;
     char msg[64] = "VestaHome support 1|";
+    msg[18] = (char)('0' + level);   // (signed with the ID: a level changed in the file breaks the signature)
     int m = (int)strlen(msg);
     for (int i = 0; i < idLen; i++) {
         if ((wchar_t)(unsigned char)fid[i] != id[i])
-            return false;   // (another unit's file)
+            return LICENSE_NONE;   // (another unit's file)
         msg[m++] = fid[i];
     }
     unsigned char sig[64];
     if (Base64(fsig, sigLen, sig, sizeof(sig)) != 64)
-        return false;
+        return LICENSE_NONE;
     unsigned char h[32];
     br_sha256_context c;
     br_sha256_init(&c);
@@ -102,15 +112,15 @@ bool LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned 
     pk.curve = BR_EC_secp256r1;
     pk.q = (unsigned char*)pub;
     pk.qlen = publen;
-    return br_ecdsa_i31_vrfy_raw(&br_ec_p256_m31, h, sizeof(h), &pk, sig, sizeof(sig)) == 1;
+    return br_ecdsa_i31_vrfy_raw(&br_ec_p256_m31, h, sizeof(h), &pk, sig, sizeof(sig)) == 1 ? level : LICENSE_NONE;
 }
 
-bool LicenseValid(const char* text, int len, const wchar_t* id)
+int LicenseValid(const char* text, int len, const wchar_t* id)
 {
     return LicenseVerify(text, len, id, kLicensePub, sizeof(kLicensePub));
 }
 
-bool LicenseFileVerify(const wchar_t* path, const wchar_t* id, const unsigned char* pub, int publen, bool* found)
+int LicenseFileVerify(const wchar_t* path, const wchar_t* id, const unsigned char* pub, int publen, bool* found)
 {
     char text[1024];
     DWORD got = 0;
@@ -118,13 +128,13 @@ bool LicenseFileVerify(const wchar_t* path, const wchar_t* id, const unsigned ch
     if (found)
         *found = f != INVALID_HANDLE_VALUE;
     if (f == INVALID_HANDLE_VALUE)
-        return false;
+        return LICENSE_NONE;
     ReadFile(f, text, sizeof(text), &got, NULL);
     CloseHandle(f);
     return LicenseVerify(text, (int)got, id, pub, publen);
 }
 
-bool LicenseFileValid(const wchar_t* path, const wchar_t* id, bool* found)
+int LicenseFileValid(const wchar_t* path, const wchar_t* id, bool* found)
 {
     return LicenseFileVerify(path, id, kLicensePub, sizeof(kLicensePub), found);
 }

@@ -71,6 +71,47 @@ static void TestFile()
           "only the given length read (the signature cut off): not valid");
 }
 
+static int Level(const char* text)
+{
+    return LicenseVerify(text, (int)strlen(text), L"VH-ABCDE-FGH12", kTestPub, sizeof(kTestPub));
+}
+
+static void TestLevels()   // a subscriber (1) or a co-author (2), the level signed with the ID (2026-11-18)
+{
+    static const char kCoauthor[] = "VestaHome support license\nid=VH-ABCDE-FGH12\nlevel=2\n"
+        "sig=D1XfibHg2sYVLgSI1i+FcZWZLbJLLLQvX3crMy1fwzMAjb7XCjNkziYd4DlSFFqgEtL4iamB+7GcVvGGL45OcA==\n";
+    Check(Level(kFile) == LICENSE_SUPPORTER, "a key without a level (all made before levels): a subscriber");
+    Check(Level(kCoauthor) == LICENSE_COAUTHOR, "a co-author's key: level 2");
+    char t[300];
+    strcpy(t, kCoauthor);
+    *strstr(t, "level=2") = '\0';
+    strcat(t, strstr(kCoauthor, "sig="));
+    Check(Level(t) == LICENSE_NONE, "the level line taken out of a co-author's key: not valid");
+    strcpy(t, kCoauthor);
+    strstr(t, "level=2")[6] = '1';
+    Check(Level(t) == LICENSE_NONE, "level=2 turned into 1: not valid");
+    strcpy(t, kFile);
+    *strstr(t, "sig=") = '\0';
+    strcat(t, "level=2\n");
+    strcat(t, strstr(kFile, "sig="));
+    Check(Level(t) == LICENSE_NONE, "level=2 added to a subscriber's key: not valid");
+    strcpy(t, kCoauthor);
+    strstr(t, "level=2")[6] = 'x';
+    Check(Level(t) == LICENSE_NONE, "a level not a digit: not valid");
+    strcpy(t, kCoauthor);
+    strcpy(strstr(t, "level=2"), "level=22\n");
+    strcat(t, strstr(kCoauthor, "sig="));
+    Check(Level(t) == LICENSE_NONE, "a level of two digits: not valid");
+    strcpy(t, kFile);
+    *strstr(t, "sig=") = '\0';
+    strcat(t, "level=1\n");
+    strcat(t, strstr(kFile, "sig="));
+    Check(Level(t) == LICENSE_SUPPORTER, "level=1 written out in a subscriber's key: still a subscriber");
+    strcpy(t, kCoauthor);
+    strstr(t, "level=2")[6] = '3';
+    Check(Level(t) == LICENSE_NONE, "an unknown level: not valid");
+}
+
 static void TestUnit()   // (the PC: the system volume's serial number; the unit: its HAL device id, else MACs)
 {
     unsigned char a[64], b[64];
@@ -111,6 +152,7 @@ int main()
 {
     TestId();
     TestFile();
+    TestLevels();
     TestUnit();
     TestPath();
     printf("test_vlicense: %d checks, %d failed\n", s_checks, s_failed);
