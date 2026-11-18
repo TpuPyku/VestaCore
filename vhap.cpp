@@ -3,6 +3,21 @@
 #include <stdio.h>
 #include <string.h>
 
+// A message waits for its answer kVhapWaitMs at most (HU 2026-11-18: an add-on's window hung - with SendMessage
+// VestaHome would hang with it, and it could not be closed for an update). SendMessageTimeout looked up at run time.
+enum { kVhapWaitMs = 3000 };
+typedef LRESULT (WINAPI* VhapTimeoutFn)(HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR);
+
+static VhapTimeoutFn VhapTimeout()
+{
+#ifdef UNDER_CE
+    static VhapTimeoutFn f = (VhapTimeoutFn)GetProcAddress(GetModuleHandle(L"coredll.dll"), L"SendMessageTimeout");
+#else
+    static VhapTimeoutFn f = (VhapTimeoutFn)GetProcAddress(GetModuleHandle(L"user32.dll"), "SendMessageTimeoutW");
+#endif
+    return f;
+}
+
 LRESULT VhapSendV(HWND to, HWND from, const wchar_t* fmt, va_list a)
 {
     enum { kMax = 511 };
@@ -16,7 +31,11 @@ LRESULT VhapSendV(HWND to, HWND from, const wchar_t* fmt, va_list a)
     c.dwData = VHAP_MAGIC;
     c.cbData = n * sizeof(wchar_t);
     c.lpData = s;
-    return SendMessage(to, WM_COPYDATA, (WPARAM)from, (LPARAM)&c);
+    VhapTimeoutFn f = VhapTimeout();
+    if (!f)
+        return SendMessage(to, WM_COPYDATA, (WPARAM)from, (LPARAM)&c);
+    DWORD_PTR r = 0;
+    return f(to, WM_COPYDATA, (WPARAM)from, (LPARAM)&c, 0 /* SMTO_NORMAL */, kVhapWaitMs, &r) ? (LRESULT)r : 0;
 }
 
 LRESULT VhapSend(HWND to, HWND from, const wchar_t* fmt, ...)
