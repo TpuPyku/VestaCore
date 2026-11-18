@@ -148,6 +148,20 @@ static void TestPath()   // a license file read from its path (VestaHome's folde
     Check(!LicenseFileValid(path, L"VH-ABCDE-FGH12", NULL), "no file, no `found` asked: not valid");
 }
 
+static void TestUnitLevel()   // this unit's level: the keys in VestaHome's folder and beside the program
+{
+    wchar_t id[LICENSE_ID_LEN], same[LICENSE_ID_LEN];
+    LicenseUnitId(same);
+    Check(LicenseUnitLevel(id) == LICENSE_NONE, "no key beside the test program: nothing");
+    Check(!wcscmp(id, same), "the unit's ID given back with the level");
+    wchar_t path[MAX_PATH];
+    LicenseKeyBeside(L"\\ResidentFlash\\VHContent\\VHPlugins\\VestaAuto\\VestaAuto.exe", path);
+    Check(!wcscmp(path, L"\\ResidentFlash\\VHContent\\VHPlugins\\VestaAuto\\VestaLicense.key"),
+          "the key beside a program: its folder");
+    LicenseKeyBeside(L"VestaAuto.exe", path);
+    Check(!wcscmp(path, L"VestaLicense.key"), "a program with no folder: the key's name alone");
+}
+
 int main()
 {
     TestId();
@@ -155,6 +169,7 @@ int main()
     TestLevels();
     TestUnit();
     TestPath();
+    TestUnitLevel();
     printf("test_vlicense: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }

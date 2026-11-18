@@ -29,5 +29,10 @@ int LicenseValid(const char* text, int len, const wchar_t* id);
 // A license file at `path` (found: whether there is one; may be NULL) - against `pub`, or the author's key.
 int LicenseFileVerify(const wchar_t* path, const wchar_t* id, const unsigned char* pub, int publen, bool* found);
 int LicenseFileValid(const wchar_t* path, const wchar_t* id, bool* found);
+// This unit's level, its ID into `id`: VestaLicense.key in VestaHome's folder (\ResidentFlash\VestaHome) or beside
+// the running program - the higher of the two (VestaHome's add-ons check it themselves: VestaHome is public).
+int LicenseUnitLevel(wchar_t* id);
+// The key's path beside a program (MAX_PATH of room): its folder + "VestaLicense.key".
+void LicenseKeyBeside(const wchar_t* program, wchar_t* path);
 
 #endif

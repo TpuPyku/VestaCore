@@ -139,6 +139,26 @@ int LicenseFileValid(const wchar_t* path, const wchar_t* id, bool* found)
     return LicenseFileVerify(path, id, kLicensePub, sizeof(kLicensePub), found);
 }
 
+void LicenseKeyBeside(const wchar_t* program, wchar_t* path)
+{
+    int n = (int)wcslen(program);
+    while (n && program[n - 1] != L'\\')
+        n--;
+    wcsncpy(path, program, n);
+    wcscpy(path + n, L"VestaLicense.key");
+}
+
+int LicenseUnitLevel(wchar_t* id)
+{
+    LicenseUnitId(id);
+    wchar_t self[MAX_PATH], path[MAX_PATH];
+    GetModuleFileNameW(NULL, self, MAX_PATH);
+    LicenseKeyBeside(self, path);
+    int home = LicenseFileValid(L"\\ResidentFlash\\VestaHome\\VestaLicense.key", id, NULL);
+    int own = LicenseFileValid(path, id, NULL);
+    return home > own ? home : own;
+}
+
 #ifdef UNDER_CE
 extern "C" BOOL KernelIoControl(DWORD code, LPVOID in, DWORD inSize, LPVOID out, DWORD outSize, LPDWORD ret);
 
