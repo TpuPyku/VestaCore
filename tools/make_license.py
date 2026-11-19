@@ -2,7 +2,9 @@
 
   keygen <private.pem> <vlicense_key.inc>   a new key pair: the private key (never into a repo - VestaCore is public),
                                             the public one as C bytes for vlicense.cpp
-  sign <private.pem> <VH-XXXXX-XXXXX> <VestaLicense.key> [level]   the license file for one head unit's ID;
+  sign <private.pem> <VH-XXXXX-XXXXX> <VestaLicense.key> [level]   the license file for one head unit's ID
+                                            (the key's path may have %USERPROFILE% or ~; "-" - the default
+                                            %USERPROFILE%\.vesta\vesta_license_private.pem);
                                             level 1 (default) - a subscriber: Android Auto's splash gone;
                                             2 - a co-author (Boosty «Соавторы»): also the smart home add-on
   id <hex of the unit's HAL device id>      the ID VestaHome shows for those bytes (LicenseIdText)
@@ -26,18 +28,50 @@ def unit_id(hw):
     return 'VH-%s-%s' % (s[:5], s[5:])
 
 
+def parse_id(text):
+    """The unit's ID as typed (case, spaces, the "VH-" and the dashes free; O for 0, I and L for 1 - the alphabet
+    has none of them): "VH-XXXXX-XXXXX", or None when it is not one."""
+    s = ''.join(text.split()).upper().replace('-', '')
+    if len(s) == 12 and s.startswith('VH'):
+        s = s[2:]
+    s = s.replace('O', '0').replace('I', '1').replace('L', '1')
+    if len(s) != 10 or any(c not in ALPHABET for c in s):
+        return None
+    return 'VH-%s-%s' % (s[:5], s[5:])
+
+
+def key_path(path):
+    """The private key's path: %VAR% and ~ opened (PowerShell passes %USERPROFILE% as it is); None - the default."""
+    if not path or path == '-':
+        return os.path.join(os.path.expanduser('~'), '.vesta', 'vesta_license_private.pem')
+    return os.path.normpath(os.path.expanduser(os.path.expandvars(path)))
+
+
 def message(uid, level=1):
     return ('VestaHome support %d|%s' % (level, uid)).encode('ascii')
 
 
 def sign(priv_path, uid, level=1):
     if level not in (1, 2):
-        sys.exit('level: 1 (subscriber) or 2 (co-author)')
-    key = serialization.load_pem_private_key(open(priv_path, 'rb').read(), password=None)
+        raise ValueError('level: 1 (subscriber) or 2 (co-author)')
+    with open(priv_path, 'rb') as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
     r, s = decode_dss_signature(key.sign(message(uid, level), ec.ECDSA(hashes.SHA256())))
     sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big')
     lvl = 'level=%d\n' % level if level > 1 else ''
     return 'VestaHome support license\nid=%s\n%ssig=%s\n' % (uid, lvl, base64.b64encode(sig).decode('ascii'))
+
+
+def write_key(priv_path, typed_id, level, out_path):
+    """The license for the ID as typed written to out_path; its ID back. ValueError: not an ID or not a level;
+    the key not there - FileNotFoundError (nothing written then)."""
+    uid = parse_id(typed_id)
+    if not uid:
+        raise ValueError('not a unit ID (VH-XXXXX-XXXXX): %r' % typed_id)
+    text = sign(key_path(priv_path), uid, level)
+    with open(out_path, 'w', newline='\n') as f:
+        f.write(text)
+    return uid
 
 
 def keygen(priv_path, inc_path):
@@ -63,7 +97,10 @@ def main(a):
     if len(a) == 3 and a[0] == 'keygen':
         keygen(a[1], a[2])
     elif len(a) in (4, 5) and a[0] == 'sign':
-        open(a[3], 'w', newline='\n').write(sign(a[1], a[2], int(a[4]) if len(a) == 5 else 1))
+        try:
+            print(write_key(a[1], a[2], int(a[4]) if len(a) == 5 else 1, a[3]))
+        except (ValueError, OSError) as e:
+            sys.exit(str(e))
     elif len(a) == 2 and a[0] == 'id':
         print(unit_id(bytes.fromhex(a[1])))
     else:
