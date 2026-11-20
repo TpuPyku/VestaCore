@@ -15,10 +15,12 @@ struct HttpSetup {                       // the program's, given once to HttpIni
 };
 void HttpInit(const HttpSetup* setup);   // before any other call
 
-struct HttpExtra {             // a request's more: its headers, the answer's Location
+struct HttpExtra {             // a request's more: its headers, the answer's Location and Date
     const char* headers;       // e.g. "Range: bytes=0-1048575\r\n" (each line with CR LF), NULL none
     char*       location;      // the answer's Location (a redirect), NULL not wanted
     int         locCap;
+    char*       date;          // the answer's Date ("Fri, 20 Nov 2026 10:54:07 GMT"), NULL not wanted
+    int         dateCap;
 };
 // The answer's body (malloc'ed, zero-terminated) in *body, the HTTP status in *status; NET_OK or an error. With
 // ifNoneMatch the server may answer 304 (no body); the ETag of the answer goes to etag.

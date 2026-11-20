@@ -70,6 +70,12 @@ static void TestHeaders()
     ok = Get("google.com", false, "/", &st, &b, &len, 0, 0, 0, &where);
     free(b);
     Check(ok && st == 301 && !strcmp(loc, "http://www.google.com/"), "Location of a redirect");
+
+    char date[40] = "";
+    HttpExtra when = { 0, 0, 0, date, sizeof(date) };
+    ok = Get("ya.ru", false, "/", &st, &b, &len, 0, 0, 0, &when);
+    free(b);
+    Check(ok && strlen(date) == 29 && !strcmp(date + 26, "GMT"), "the answer's Date (a unit without GPS: its clock)");
 }
 
 static DWORD WINAPI Worker(LPVOID p)

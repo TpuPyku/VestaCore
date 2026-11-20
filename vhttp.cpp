@@ -547,6 +547,8 @@ static int Exchange(Conn* c, const char* path, const char* ifNoneMatch, unsigned
             Value(line, 5, etag, etagCap);
         else if (extra && extra->location && !_strnicmp(line, "Location:", 9))
             Value(line, 9, extra->location, extra->locCap);
+        else if (extra && extra->date && !_strnicmp(line, "Date:", 5))
+            Value(line, 5, extra->date, extra->dateCap);
     }
 
     if (*status == 304) {
@@ -660,6 +662,8 @@ int HttpGet(const char* host, bool https, const char* path, unsigned char** body
     *status = 0;
     if (etag)
         etag[0] = 0;
+    if (extra && extra->date)
+        extra->date[0] = 0;
     Conn* c = GetConn(host, https);
     if (!c)
         return NET_MEMORY;
