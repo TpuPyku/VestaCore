@@ -108,6 +108,23 @@ int main()
           VFavsMove(&f, 3, -1) == -1 && !wcscmp(f.f[0].name, L"B") && !wcscmp(f.f[1].name, L"C") &&
           !wcscmp(f.f[2].name, L"A"), "favs: the first up, the last down, no such - not moved");
     Check(VFavsMove(&f, 0, 1) == 1 && !wcscmp(f.f[0].name, L"C") && !wcscmp(f.f[1].name, L"B"), "favs: the first down");
+
+    // the search finds them too (the user 2026-11-21): a part of the name, any case, ё as е
+    VFavsClear(&f);
+    VFavsAdd(&f, L"Дом", 1, 1);
+    VFavsAdd(&f, L"Работа", 2, 2);
+    VFavsAdd(&f, L"Дача Ёлки", 3, 3);
+    VFavsAdd(&f, L"Домовой магазин", 4, 4);
+    int hit[VFAV_MAX];
+    Check(VFavsFind(&f, L"дом", hit, VFAV_MAX) == 2 && hit[0] == 0 && hit[1] == 3, "find: a part, the case aside, in order");
+    Check(VFavsFind(&f, L"ЕЛКИ", hit, VFAV_MAX) == 1 && hit[0] == 2, "find: ё and е the same");
+    Check(VFavsFind(&f, L"бот", hit, VFAV_MAX) == 1 && hit[0] == 1, "find: inside the name");
+    Check(VFavsFind(&f, L"дом", hit, 1) == 1 && hit[0] == 0, "find: no more than the room");
+    Check(VFavsFind(&f, L"парк", hit, VFAV_MAX) == 0, "find: none");
+    Check(VFavsFind(&f, L"", hit, VFAV_MAX) == 0 && VFavsFind(&f, L"  ", hit, VFAV_MAX) == 0, "find: an empty query - none");
+    Check(VFavsFind(&f, L" дом ", hit, VFAV_MAX) == 2, "find: the query's spaces at its ends aside");
+    VFavsDel(&f, 3);
+    Check(VFavsFind(&f, L"магазин", hit, VFAV_MAX) == 0, "find: a deleted one is not found (past the count)");
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }

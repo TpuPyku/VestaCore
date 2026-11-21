@@ -22,5 +22,9 @@ void VFavsDel(VFavs* f, int i);
 int  VFavsMove(VFavs* f, int i, int dir);   // dir -1 up, 1 down: its new index; -1 not moved (the end)
 bool VFavsLoad(VFavs* f, const wchar_t* path);   // false: no file (none then)
 bool VFavsSave(const VFavs* f, const wchar_t* path);
+// The favourites whose name has the query in it (the case aside, ё as е; the query's end spaces aside): their indexes
+// into idx in their order, cap at most; their count (0: none, or an empty query). The user 2026-11-21: OSMapsCE's
+// search finds them too.
+int  VFavsFind(const VFavs* f, const wchar_t* query, int* idx, int cap);
 
 #endif

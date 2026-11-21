@@ -120,3 +120,29 @@ bool VFavsSave(const VFavs* f, const wchar_t* path)
     CloseHandle(h);
     return ok;
 }
+
+static void FindForm(const wchar_t* s, wchar_t* out, int cap)   // the form compared: lower case, ё as е, no end spaces
+{
+    while (*s == L' ')
+        s++;
+    int n = 0;
+    for (; s[n] && n < cap - 1; n++)
+        out[n] = s[n] == L'\x401' || s[n] == L'\x451' ? L'\x435' : s[n];
+    while (n > 0 && out[n - 1] == L' ')
+        n--;
+    out[n] = 0;
+    CharLowerBuffW(out, n);
+}
+
+int VFavsFind(const VFavs* f, const wchar_t* query, int* idx, int cap)
+{
+    wchar_t q[VFAV_NAME * 2], name[VFAV_NAME];
+    FindForm(query, q, VFAV_NAME * 2);
+    int m = 0;
+    for (int i = 0; q[0] && i < f->n && m < cap; i++) {
+        FindForm(f->f[i].name, name, VFAV_NAME);
+        if (wcsstr(name, q))
+            idx[m++] = i;
+    }
+    return m;
+}
