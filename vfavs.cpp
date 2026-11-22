@@ -26,7 +26,16 @@ int VFavsAdd(VFavs* f, const wchar_t* name, double lat, double lon)
     v.lat = lat;
     v.lon = lon;
     v.icon = VFAV_STAR;
+    v.addr[0] = 0;
     return f->n++;
+}
+
+void VFavsSetAddr(VFavs* f, int i, const wchar_t* addr)
+{
+    if (i < 0 || i >= f->n || !addr)
+        return;
+    wcsncpy(f->f[i].addr, addr, VFAV_ADDR - 1);
+    f->f[i].addr[VFAV_ADDR - 1] = 0;
 }
 
 int VFavsRename(VFavs* f, int i, const wchar_t* name)
@@ -64,7 +73,7 @@ static int SignOf(const char* tab)   // the sign's column ("<TAB>n"); none or ba
     return icon >= 0 && icon < VFAV_ICONS ? icon : VFAV_STAR;
 }
 
-static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon[<TAB>sign]"; anything else left out
+static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon[<TAB>sign[<TAB>address]]"; anything else left out
 {
     char* t1 = strchr(s, '\t');
     char* t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
@@ -74,8 +83,14 @@ static void TakeLine(VFavs* f, char* s)   // "name<TAB>lat<TAB>lon[<TAB>sign]"; 
     wchar_t name[VFAV_NAME * 2];
     int i = MultiByteToWideChar(CP_UTF8, 0, s, -1, name, VFAV_NAME * 2) > 0 ?
             VFavsAdd(f, name, atof(t1 + 1), atof(t2 + 1)) : -1;
+    char* t3 = i >= 0 ? strchr(t2 + 1, '\t') : NULL;
+    char* t4 = t3 ? strchr(t3 + 1, '\t') : NULL;
+    if (t4)
+        *t4 = 0;   // (the sign's column ends there)
     if (i >= 0)
-        f->f[i].icon = SignOf(strchr(t2 + 1, '\t'));
+        f->f[i].icon = SignOf(t3);
+    if (t4 && !MultiByteToWideChar(CP_UTF8, 0, t4 + 1, -1, f->f[i].addr, VFAV_ADDR))
+        f->f[i].addr[0] = 0;   // (too long: none - asked again)
 }
 
 bool VFavsLoad(VFavs* f, const wchar_t* path)
@@ -110,10 +125,11 @@ bool VFavsSave(const VFavs* f, const wchar_t* path)
         return false;
     bool ok = true;
     for (int i = 0; i < f->n && ok; i++) {
-        char name[VFAV_NAME * 4], line[VFAV_NAME * 4 + 64];
+        char name[VFAV_NAME * 4], addr[VFAV_ADDR * 4], line[(VFAV_NAME + VFAV_ADDR) * 4 + 64];
         WideCharToMultiByte(CP_UTF8, 0, f->f[i].name, -1, name, sizeof(name), NULL, NULL);
-        int len = _snprintf(line, sizeof(line), "%s\t%.6f\t%.6f\t%d\r\n", name, f->f[i].lat, f->f[i].lon,
-                            f->f[i].icon);
+        WideCharToMultiByte(CP_UTF8, 0, f->f[i].addr, -1, addr, sizeof(addr), NULL, NULL);
+        int len = _snprintf(line, sizeof(line), "%s\t%.6f\t%.6f\t%d%s%s\r\n", name, f->f[i].lat, f->f[i].lon,
+                            f->f[i].icon, addr[0] ? "\t" : "", addr);
         DWORD put = 0;
         ok = len > 0 && WriteFile(h, line, len, &put, NULL) && put == (DWORD)len;
     }
@@ -134,14 +150,44 @@ static void FindForm(const wchar_t* s, wchar_t* out, int cap)   // the form comp
     CharLowerBuffW(out, n);
 }
 
+static bool Gap(wchar_t c)   // between the words: a space, a comma, a dot
+{
+    return c == L' ' || c == L',' || c == L'.';
+}
+
+static bool AllWords(const wchar_t* q, const wchar_t* text)   // each word of q (in its form) somewhere in text
+{
+    bool any = false;
+    for (const wchar_t* w = q; *w;) {
+        while (*w && Gap(*w))
+            w++;
+        int n = 0;
+        while (w[n] && !Gap(w[n]))
+            n++;
+        if (!n)
+            break;
+        wchar_t word[VFAV_ADDR];
+        n = n < VFAV_ADDR - 1 ? n : VFAV_ADDR - 1;
+        wcsncpy(word, w, n);
+        word[n] = 0;
+        if (!wcsstr(text, word))
+            return false;
+        any = true;
+        w += n;
+    }
+    return any;
+}
+
 int VFavsFind(const VFavs* f, const wchar_t* query, int* idx, int cap)
 {
-    wchar_t q[VFAV_NAME * 2], name[VFAV_NAME];
-    FindForm(query, q, VFAV_NAME * 2);
+    wchar_t q[VFAV_ADDR], both[VFAV_NAME + VFAV_ADDR + 2], text[VFAV_NAME + VFAV_ADDR + 2];
+    FindForm(query, q, VFAV_ADDR);
     int m = 0;
     for (int i = 0; q[0] && i < f->n && m < cap; i++) {
-        FindForm(f->f[i].name, name, VFAV_NAME);
-        if (wcsstr(name, q))
+        _snwprintf(both, VFAV_NAME + VFAV_ADDR + 2, L"%s %s", f->f[i].name, f->f[i].addr);
+        both[VFAV_NAME + VFAV_ADDR + 1] = 0;
+        FindForm(both, text, VFAV_NAME + VFAV_ADDR + 2);
+        if (AllWords(q, text))
             idx[m++] = i;
     }
     return m;

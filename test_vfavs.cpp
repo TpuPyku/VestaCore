@@ -125,6 +125,34 @@ int main()
     Check(VFavsFind(&f, L" дом ", hit, VFAV_MAX) == 2, "find: the query's spaces at its ends aside");
     VFavsDel(&f, 3);
     Check(VFavsFind(&f, L"магазин", hit, VFAV_MAX) == 0, "find: a deleted one is not found (past the count)");
+
+    // the address too (the user 2026-11-22: a favourite on the street searched for is found): kept in the file, each
+    // word of the query in the name or the address
+    VFavsClear(&f);
+    VFavsAdd(&f, L"Дом", 1, 1);
+    VFavsAdd(&f, L"Работа", 2, 2);
+    Check(!f.f[0].addr[0], "addr: a new favourite - none yet");
+    VFavsSetAddr(&f, 0, L"улица Лёни Голикова, 15, Москва");
+    VFavsSetAddr(&f, 1, L"Тверская улица, 7, Москва");
+    VFavsSetAddr(&f, 5, L"x");
+    Check(!wcscmp(f.f[0].addr, L"улица Лёни Голикова, 15, Москва") && f.n == 2, "addr: set; none past the count");
+    Check(VFavsFind(&f, L"голикова", hit, VFAV_MAX) == 1 && hit[0] == 0, "find: by the street");
+    Check(VFavsFind(&f, L"Лени Голикова 15", hit, VFAV_MAX) == 1 && hit[0] == 0, "find: the street and the house, ё as е");
+    Check(VFavsFind(&f, L"голикова 7", hit, VFAV_MAX) == 0, "find: every word needed");
+    Check(VFavsFind(&f, L"москва", hit, VFAV_MAX) == 2, "find: the city - both");
+    Check(VFavsFind(&f, L"дом тверская", hit, VFAV_MAX) == 0 && VFavsFind(&f, L"работа тверская", hit, VFAV_MAX) == 1,
+          "find: the name's and the address's words together");
+    const wchar_t* path2 = L"obj\\favs_addr.txt";
+    VFavs g2;
+    Check(VFavsSave(&f, path2) && VFavsLoad(&g2, path2) && g2.n == 2 &&
+          !wcscmp(g2.f[0].addr, L"улица Лёни Голикова, 15, Москва") && !wcscmp(g2.f[1].addr, L"Тверская улица, 7, Москва"),
+          "addr: saved and loaded");
+    t = _wfopen(path2, L"wb");
+    fputs("A\t1\t2\t4\r\nB\t1\t2\t3\tStreet, 1\r\n", t);
+    fclose(t);
+    Check(VFavsLoad(&g2, path2) && g2.n == 2 && !g2.f[0].addr[0] && g2.f[0].icon == 4 && !wcscmp(g2.f[1].addr, L"Street, 1")
+          && g2.f[1].icon == 3, "addr: an older line - none; the fifth column - it");
+    DeleteFileW(path2);
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
