@@ -101,6 +101,15 @@ COLORREF RvcKey()
     return kKey;
 }
 
+int RvcInputs(int found, int in[2])
+{
+    in[0] = found == 1 ? 1 : 0;
+    in[1] = 1 - in[0];
+    return 2;
+}
+
+static int s_input = -1;   // the input the camera was found on
+
 int RvcVideo(bool on)
 {
     if (s_sdk <= 0)
@@ -108,7 +117,15 @@ int RvcVideo(bool on)
     DWORD signal = 0;
     if (on) {
         D.inDisable();
-        D.select(0, &signal);   // 0 = the camera
+        int in[2], n = RvcInputs(s_input, in), got[2] = { -1, -1 };
+        for (int i = 0; i < n && !signal; i++) {   // (the driver waits 200 ms after each)
+            D.select((DWORD)in[i], &signal);
+            got[i] = (int)signal;
+            if (signal)
+                s_input = in[i];
+        }
+        if (!signal)
+            D.select((DWORD)in[0], &signal);   // none anywhere: back to the first
         D.inEnable();
         D.showPip(0xFF, kKey);
         if (D.backlightOn)
@@ -116,7 +133,8 @@ int RvcVideo(bool on)
         if (D.touchOff)   // as the shell: no taps through the camera picture
             D.touchOff();
         if (s_log)
-            s_log(L"камера: видео включено, сигнал %u", (unsigned)signal);
+            s_log(L"камера: видео включено, сигнал %u (вход %d: %d, вход %d: %d)", (unsigned)signal, in[0], got[0],
+                  in[1], got[1]);
     } else {
         D.hidePip();
         D.inDisable();
