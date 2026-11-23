@@ -42,7 +42,9 @@ bool LogDir(wchar_t* dir, const wchar_t* exeDir)
     static wchar_t s_dir[MAX_PATH];
     static DWORD   s_tick;
     static bool    s_ok, s_tried;
-    if (!s_tried || GetTickCount() - s_tick > 30000) {
+    // looked up again every 30 s (a card put in), and at once when the folder found is gone (the user 2026-11-23: the
+    // card pulled, VestaHome fell - its crash note went to the card no longer there, not to RAM)
+    if (!s_tried || GetTickCount() - s_tick > 30000 || (s_ok && GetFileAttributes(s_dir) == 0xFFFFFFFF)) {
         static const wchar_t* vols[4] = { L"\\SDMemory", L"\\USB Disk", L"\\USBDisk", L"\\USBDevice" };
         s_tried = true;
         s_tick = GetTickCount();
