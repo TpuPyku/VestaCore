@@ -125,6 +125,50 @@ static void TestUnit()   // (the PC: the system volume's serial number; the unit
     Check(!wcscmp(id, same) && !wcsncmp(id, L"VH-", 3), "this unit's ID: the text of its bytes");
 }
 
+// The unit's machine ID from the MCU (2026-11-25: the HAL's device id is the same on every unit): kept for the boot in
+// the registry (the PC: HKCU), the ID made of it; the HAL's bytes only as the old key of the passwords.
+static void TestMachine()
+{
+    unsigned char a[LICENSE_UNIT_MAX], b[LICENSE_UNIT_MAX];
+    Check(LicenseMachineBytes(L"41800514 180624 093151", a, sizeof(a)) > 0, "a machine ID: its bytes");
+    Check(!LicenseMachineBytes(L"", a, sizeof(a)) && !LicenseMachineBytes(NULL, a, sizeof(a)),
+          "no machine ID: no bytes");
+    Check(!LicenseMachineBytes(L"4180\x01", a, sizeof(a)), "a control character: not a machine ID");
+    Check(!LicenseMachineBytes(L"41800514 180624 093151 41800514 180624 093151 41800514", a, sizeof(a)),
+          "longer than 48: not a machine ID");
+    Check(LicenseMachineBytes(L"4180", a, 8) == 8 && !memcmp(a, "MCU14180", 8), "a machine ID: \"MCU1\" and its text");
+    Check(!LicenseMachineBytes(L"4180", a, 7), "a machine ID: no room - none");
+    Check(LicenseMachineBytes(L"123456789012345678901234567890123456789012345678", a, sizeof(a)) == 52,
+          "a machine ID of 48: the longest");
+    Check(LicenseMachineBytes(L" ~", a, sizeof(a)) == 6 && !LicenseMachineBytes(L"\x7F", a, sizeof(a)),
+          "a machine ID: from the space to the tilde");
+    int n1 = LicenseMachineBytes(L"41800514 180624 093151", a, sizeof(a));
+    int n2 = LicenseMachineBytes(L"41800514 180624 149000", b, sizeof(b));
+    wchar_t id1[LICENSE_ID_LEN], id2[LICENSE_ID_LEN];
+    LicenseIdText(a, n1, id1);
+    LicenseIdText(b, n2, id2);
+    Check(wcscmp(id1, id2) != 0, "two units' machine IDs: two IDs");
+
+    Check(LicenseMachineSet(L"41800514 180624 093151"), "the machine ID kept");
+    wchar_t got[64];
+    Check(LicenseMachineGet(got, 64) && !wcscmp(got, L"41800514 180624 093151"), "and read back");
+    int source = -1;
+    int n = LicenseUnitBytes(b, sizeof(b), &source);
+    Check(source == LICENSE_SRC_MCU && n == n1 && !memcmp(a, b, n), "the unit's bytes: the machine ID's");
+    wchar_t id[LICENSE_ID_LEN];
+    LicenseUnitId(id);
+    Check(!wcscmp(id, id1), "the unit's ID: of the machine ID");
+    Check(!LicenseMachineSet(L""), "an empty machine ID: not kept");
+    Check(LicenseMachineGet(got, 64) && !wcscmp(got, L"41800514 180624 093151"), "the kept one stays");
+
+    Check(!Verify(kFile, L""), "an unknown ID (\"\"): no file fits");
+    LicenseMachineSet(NULL);   // forgotten
+    Check(!LicenseMachineGet(got, 64) && !got[0], "forgotten: none");
+    n = LicenseUnitBytes(b, sizeof(b), &source);
+    Check(source == LICENSE_SRC_PC && n == 4, "no machine ID on the PC: the volume's serial number");
+    Check(LicenseLegacyBytes(a, sizeof(a)) == 4 && !memcmp(a, b, 4), "the old bytes: on the PC the same");
+}
+
 static void TestPath()   // a license file read from its path (VestaHome's folder; VestaAuto reads it itself)
 {
     wchar_t dir[MAX_PATH], path[MAX_PATH];
@@ -164,12 +208,18 @@ static void TestUnitLevel()   // this unit's level: the keys in VestaHome's fold
 
 int main()
 {
+    wchar_t kept[64] = L"";   // (the PC build of VestaHome may have kept its demo machine ID: put back at the end)
+    LicenseMachineGet(kept, 64);
+    LicenseMachineSet(NULL);
+    TestMachine();
     TestId();
     TestFile();
     TestLevels();
     TestUnit();
     TestPath();
     TestUnitLevel();
+    if (kept[0])
+        LicenseMachineSet(kept);
     printf("test_vlicense: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }

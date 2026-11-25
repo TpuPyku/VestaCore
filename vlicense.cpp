@@ -187,27 +187,91 @@ static int MacBytes(unsigned char* buf, int cap)   // the adapters' MAC addresse
 }
 #endif
 
-int LicenseUnitBytes(unsigned char* buf, int cap, int* source)
+static int PcBytes(unsigned char* buf)   // PC test build: the system volume's serial number
 {
-    int n, src;
+    DWORD serial = 0;
+    GetVolumeInformationW(L"C:\\", NULL, 0, &serial, NULL, NULL, NULL, 0);
+    memcpy(buf, &serial, 4);
+    return 4;
+}
+
+int LicenseLegacyBytes(unsigned char* buf, int cap)
+{
 #ifdef UNDER_CE
     const DWORD IOCTL_HAL_GET_DEVICEID = 0x01010054;   // CTL_CODE(FILE_DEVICE_HAL, 21, METHOD_BUFFERED, 0)
     DWORD got = 0;
     memset(buf, 0, cap);
-    *(DWORD*)buf = cap;   // DEVICE_ID.dwSize
-    if (KernelIoControl(IOCTL_HAL_GET_DEVICEID, NULL, 0, buf, cap, &got) && got > 20) {
-        n = (int)got;
-        src = LICENSE_SRC_HAL;
-    } else {
-        n = MacBytes(buf, cap);
-        src = n ? LICENSE_SRC_MAC : LICENSE_SRC_NONE;
-    }
+    *(DWORD*)buf = cap;   // DEVICE_ID.dwSize (the answer depends on the room: LICENSE_UNIT_MAX, as it always was)
+    if (KernelIoControl(IOCTL_HAL_GET_DEVICEID, NULL, 0, buf, cap, &got) && got > 20)
+        return (int)got;
+    return MacBytes(buf, cap);
 #else
-    DWORD serial = 0;   // PC test build: the system volume's serial number
-    GetVolumeInformationW(L"C:\\", NULL, 0, &serial, NULL, NULL, NULL, 0);
-    memcpy(buf, &serial, 4);
-    n = 4;
-    src = LICENSE_SRC_PC;
+    (void)cap;
+    return PcBytes(buf);
+#endif
+}
+
+int LicenseMachineBytes(const wchar_t* text, unsigned char* buf, int cap)
+{
+    int n = text ? (int)wcslen(text) : 0;
+    if (!n || n > LICENSE_MACHINE_MAX || cap < 4 + n)
+        return 0;
+    memcpy(buf, "MCU1", 4);   // (never the same bytes as the HAL's or the PC's)
+    for (int i = 0; i < n; i++) {
+        if (text[i] < 0x20 || text[i] > 0x7E)
+            return 0;
+        buf[4 + i] = (unsigned char)text[i];
+    }
+    return 4 + n;
+}
+
+#ifdef UNDER_CE
+#define MACHINE_ROOT HKEY_LOCAL_MACHINE
+#else
+#define MACHINE_ROOT HKEY_CURRENT_USER
+#endif
+
+bool LicenseMachineSet(const wchar_t* text)
+{
+    unsigned char b[4 + LICENSE_MACHINE_MAX];
+    HKEY k;
+    if (text && !LicenseMachineBytes(text, b, sizeof(b)))
+        return false;
+    if (RegCreateKeyExW(MACHINE_ROOT, L"Software\\Vesta", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) != ERROR_SUCCESS)
+        return false;
+    LONG r = text ? RegSetValueExW(k, L"Machine", 0, REG_SZ, (const BYTE*)text, (DWORD)(wcslen(text) + 1) * 2)
+                  : RegDeleteValueW(k, L"Machine");
+    RegCloseKey(k);
+    return text ? r == ERROR_SUCCESS : true;
+}
+
+bool LicenseMachineGet(wchar_t* text, int cap)
+{
+    HKEY k;
+    DWORD type = 0, size = (DWORD)(cap - 1) * 2;
+    text[0] = 0;
+    if (RegOpenKeyExW(MACHINE_ROOT, L"Software\\Vesta", 0, KEY_READ, &k) != ERROR_SUCCESS)
+        return false;
+    LONG r = RegQueryValueExW(k, L"Machine", NULL, &type, (BYTE*)text, &size);
+    RegCloseKey(k);
+    if (r != ERROR_SUCCESS || type != REG_SZ) {
+        text[0] = 0;
+        return false;
+    }
+    text[size / 2 < (DWORD)cap ? size / 2 : cap - 1] = 0;
+    return text[0] != 0;
+}
+
+int LicenseUnitBytes(unsigned char* buf, int cap, int* source)
+{
+    wchar_t m[LICENSE_MACHINE_MAX + 2];
+    int n = LicenseMachineGet(m, LICENSE_MACHINE_MAX + 2) ? LicenseMachineBytes(m, buf, cap) : 0;
+    int src = n ? LICENSE_SRC_MCU : LICENSE_SRC_NONE;
+#ifndef UNDER_CE
+    if (!n) {
+        n = PcBytes(buf);
+        src = LICENSE_SRC_PC;
+    }
 #endif
     if (source)
         *source = src;
@@ -217,5 +281,9 @@ int LicenseUnitBytes(unsigned char* buf, int cap, int* source)
 void LicenseUnitId(wchar_t* out)
 {
     unsigned char hw[LICENSE_UNIT_MAX];
-    LicenseIdText(hw, LicenseUnitBytes(hw, sizeof(hw), NULL), out);
+    int n = LicenseUnitBytes(hw, sizeof(hw), NULL);
+    if (n)
+        LicenseIdText(hw, n, out);
+    else
+        out[0] = 0;   // (not known yet: no license fits an empty ID)
 }

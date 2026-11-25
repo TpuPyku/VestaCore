@@ -9,17 +9,28 @@
 
 #include <wchar.h>
 
-enum { LICENSE_ID_LEN = 15, LICENSE_UNIT_MAX = 256 };   // "VH-XXXXX-XXXXX" and its 0; the unit's bytes' room
-enum { LICENSE_SRC_NONE, LICENSE_SRC_HAL, LICENSE_SRC_MAC, LICENSE_SRC_PC };
+enum { LICENSE_ID_LEN = 15, LICENSE_UNIT_MAX = 256, LICENSE_MACHINE_MAX = 48 };   // "VH-XXXXX-XXXXX" and its 0; the unit's bytes' room
+enum { LICENSE_SRC_NONE, LICENSE_SRC_HAL, LICENSE_SRC_MAC, LICENSE_SRC_PC, LICENSE_SRC_MCU };
 enum { LICENSE_NONE, LICENSE_SUPPORTER, LICENSE_COAUTHOR };   // what a license file gives: its level, 0 - nothing
 
-// The unit's own bytes (VestaHome's and its add-ons' - the same ID in each, 2026-11-15): the HAL's device id
-// (IOCTL_HAL_GET_DEVICEID), else the adapters' MAC addresses; the PC build - the system volume's serial number. Their
-// count; source (may be NULL): LICENSE_SRC_*.
+// The unit's own bytes (VestaHome's and its add-ons' - the same ID in each, 2026-11-15): its machine ID from the MCU
+// (2026-11-25: the HAL's device id is the same on every unit - VH-A6R3Y-CJN2Y everywhere), kept for the boot by
+// LicenseMachineSet; none yet - 0 bytes, no ID. The PC build with no machine ID: the system volume's serial number.
+// Their count; source (may be NULL): LICENSE_SRC_*.
 int LicenseUnitBytes(unsigned char* buf, int cap, int* source);
-// The unit's ID shown to the user: SHA-256 of its hardware bytes (the HAL's device id), 50 bits in 10 letters.
+// The old bytes (until 2026-11-25): the HAL's device id, else the adapters' MAC addresses; the PC - as above. Only the
+// passwords' old key (vsecret) uses them.
+int LicenseLegacyBytes(unsigned char* buf, int cap);
+// The machine ID's text (VestaHome: "<0x4118> <0x4111> <0x4112>" as "О системе" shows it) as the unit's bytes; 0 - not
+// one (empty, not printable ASCII, longer than LICENSE_MACHINE_MAX).
+int LicenseMachineBytes(const wchar_t* text, unsigned char* buf, int cap);
+// The machine ID kept for this boot (the unit: HKLM\Software\Vesta "Machine" - the registry starts afresh at each
+// boot; the PC: HKCU): VestaHome puts it when the MCU has told it, the add-ons read it. NULL - forgotten. False - not one.
+bool LicenseMachineSet(const wchar_t* text);
+bool LicenseMachineGet(wchar_t* text, int cap);   // false: none kept ("")
+// The unit's ID shown to the user: SHA-256 of its bytes, 50 bits in 10 letters.
 void LicenseIdText(const unsigned char* hw, int n, wchar_t* out);
-// This unit's ID: its bytes in LICENSE_UNIT_MAX of room (the HAL's answer depends on the room: one size for all who ask).
+// This unit's ID ("" - its machine ID not known yet: no license fits).
 void LicenseUnitId(wchar_t* out);
 // A license file's text (len bytes) for this ID, against the public key `pub` (65 bytes, uncompressed P-256): its
 // level (LICENSE_*; LICENSE_NONE - not valid, true-or-false use is "any level").
