@@ -187,6 +187,7 @@ static int MacBytes(unsigned char* buf, int cap)   // the adapters' MAC addresse
 }
 #endif
 
+#ifndef UNDER_CE
 static int PcBytes(unsigned char* buf)   // PC test build: the system volume's serial number
 {
     DWORD serial = 0;
@@ -194,6 +195,7 @@ static int PcBytes(unsigned char* buf)   // PC test build: the system volume's s
     memcpy(buf, &serial, 4);
     return 4;
 }
+#endif
 
 int LicenseLegacyBytes(unsigned char* buf, int cap)
 {
