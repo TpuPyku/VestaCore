@@ -1,5 +1,6 @@
 // vlicense.cpp - VestaHome's support license (vlicense.h): the unit's ID text, the license file checked by BearSSL.
 #include "vlicense.h"
+#include "vmcushm.h"
 #include <windows.h>
 #include <string.h>
 #include <stdlib.h>
@@ -227,47 +228,99 @@ int LicenseMachineBytes(const wchar_t* text, unsigned char* buf, int cap)
     return 4 + n;
 }
 
-#ifdef UNDER_CE
-#define MACHINE_ROOT HKEY_LOCAL_MACHINE
-#else
-#define MACHINE_ROOT HKEY_CURRENT_USER
-#endif
-
-bool LicenseMachineSet(const wchar_t* text)
+static void NumText(const unsigned char* p, int len, wchar_t* out)   // 0x4112's text: up to 11, the spaces around dropped
 {
-    unsigned char b[4 + LICENSE_MACHINE_MAX];
-    HKEY k;
-    if (text && !LicenseMachineBytes(text, b, sizeof(b)))
-        return false;
-    if (RegCreateKeyExW(MACHINE_ROOT, L"Software\\Vesta", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) != ERROR_SUCCESS)
-        return false;
-    LONG r = text ? RegSetValueExW(k, L"Machine", 0, REG_SZ, (const BYTE*)text, (DWORD)(wcslen(text) + 1) * 2)
-                  : RegDeleteValueW(k, L"Machine");
-    RegCloseKey(k);
-    return text ? r == ERROR_SUCCESS : true;
+    int n = len - 1 < 11 ? len - 1 : 11, k = 0;
+    p++;
+    while (n > 0 && *p == ' ') {
+        p++;
+        n--;
+    }
+    for (; k < n; k++)
+        out[k] = p[k] >= 0x20 && p[k] < 0x7F ? (wchar_t)p[k] : L' ';
+    while (k > 0 && out[k - 1] == L' ')
+        k--;
+    out[k] = 0;
 }
 
-bool LicenseMachineGet(wchar_t* text, int cap)
+void LicenseMachineTake(LicenseMachine* m, int msgId, const unsigned char* p, int len)
 {
-    HKEY k;
-    DWORD type = 0, size = (DWORD)(cap - 1) * 2;
-    text[0] = 0;
-    if (RegOpenKeyExW(MACHINE_ROOT, L"Software\\Vesta", 0, KEY_READ, &k) != ERROR_SUCCESS)
-        return false;
-    LONG r = RegQueryValueExW(k, L"Machine", NULL, &type, (BYTE*)text, &size);
-    RegCloseKey(k);
-    if (r != ERROR_SUCCESS || type != REG_SZ) {
-        text[0] = 0;
+    if (msgId == 0x4118 && len >= 5)
+        _snwprintf(m->id, 16, L"%02X%02X%02X%02X", p[1], p[2], p[3], p[4]);
+    else if (msgId == 0x4111 && len >= 5)
+        _snwprintf(m->date, 8, L"%02X%02X%02X", p[2], p[3], p[4]);
+    else if (msgId == 0x4112 && len >= 3)
+        NumText(p, len, m->num);
+}
+
+bool LicenseMachineText(const LicenseMachine* m, wchar_t* out, int n)
+{
+    if (!m->id[0]) {
+        wcsncpy(out, L"\x2014", n);   // (an em dash: none yet)
+        out[n - 1] = 0;
         return false;
     }
-    text[size / 2 < (DWORD)cap ? size / 2 : cap - 1] = 0;
-    return text[0] != 0;
+    _snwprintf(out, n, L"%s %s %s", m->id, m->date, m->num);
+    out[n - 1] = 0;
+    return m->date[0] && m->num[0];
+}
+
+static const wchar_t* s_ring = MCU_SHM_NAME;
+static wchar_t        s_machine[LICENSE_MACHINE_MAX + 2];   // kept once whole
+
+static bool RingMachine(const McuShm* r, wchar_t* text, int cap)   // the latest of each part in the ring
+{
+    static const int kIds[3] = { 0x4118, 0x4111, 0x4112 };
+    LicenseMachine m;
+    memset(&m, 0, sizeof(m));
+    for (int k = 0; k < 3; k++) {
+        McuMsg best;
+        best.seq = 0;
+        for (int i = 0; i < MCU_SHM_SLOTS; i++) {
+            McuMsg c = r->msg[i];
+            if (c.id == kIds[k] && c.seq > best.seq && c.seq == r->msg[i].seq)   // (not one being rewritten)
+                best = c;
+        }
+        if (best.seq)
+            LicenseMachineTake(&m, best.id, best.data, best.len < MCU_SHM_DATA ? best.len : MCU_SHM_DATA);
+    }
+    return LicenseMachineText(&m, text, cap);
+}
+
+static void ReadRing(wchar_t* out)   // the ring's whole machine ID into out (LICENSE_MACHINE_MAX + 2), if there
+{
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(McuShm), s_ring);
+    bool there = h && GetLastError() == ERROR_ALREADY_EXISTS;   // (made here: nobody writes it - let it go)
+    const McuShm* r = there ? (const McuShm*)MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(McuShm)) : NULL;
+    wchar_t t[64];
+    unsigned char b[4 + LICENSE_MACHINE_MAX];
+    if (r && r->magic == MCU_SHM_MAGIC && RingMachine(r, t, 64) && LicenseMachineBytes(t, b, sizeof(b)))
+        wcscpy(out, t);
+    if (r)
+        UnmapViewOfFile((LPCVOID)r);
+    if (h)
+        CloseHandle(h);
+}
+
+bool LicenseMachineRead(wchar_t* text, int cap)
+{
+    if (!s_machine[0])
+        ReadRing(s_machine);
+    wcsncpy(text, s_machine, cap);
+    text[cap - 1] = 0;
+    return s_machine[0] != 0;
+}
+
+void LicenseMachineRing(const wchar_t* name)
+{
+    s_ring = name ? name : MCU_SHM_NAME;
+    s_machine[0] = 0;
 }
 
 int LicenseUnitBytes(unsigned char* buf, int cap, int* source)
 {
     wchar_t m[LICENSE_MACHINE_MAX + 2];
-    int n = LicenseMachineGet(m, LICENSE_MACHINE_MAX + 2) ? LicenseMachineBytes(m, buf, cap) : 0;
+    int n = LicenseMachineRead(m, LICENSE_MACHINE_MAX + 2) ? LicenseMachineBytes(m, buf, cap) : 0;
     int src = n ? LICENSE_SRC_MCU : LICENSE_SRC_NONE;
 #ifndef UNDER_CE
     if (!n) {

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include "test_mcuring.h"
 
 static int s_checks, s_failed;
 
@@ -125,8 +126,90 @@ static void TestUnit()   // (the PC: the system volume's serial number; the unit
     Check(!wcscmp(id, same) && !wcsncmp(id, L"VH-", 3), "this unit's ID: the text of its bytes");
 }
 
-// The unit's machine ID from the MCU (2026-11-25: the HAL's device id is the same on every unit): kept for the boot in
-// the registry (the PC: HKCU), the ID made of it; the HAL's bytes only as the old key of the passwords.
+static void TestMachineParts()   // the MCU's three messages -> the text "Details" shows
+{
+    LicenseMachine m;
+    memset(&m, 0, sizeof(m));
+    wchar_t t[64];
+    Check(!LicenseMachineText(&m, t, 64) && !wcscmp(t, L"\x2014"), "parts: none - a dash");
+    static const unsigned char a[5] = { 0, 0x41, 0x80, 0x05, 0x14 }, b[5] = { 0, 0x20, 0x18, 0x06, 0x24 };
+    LicenseMachineTake(&m, 0x4118, a, 5);
+    Check(!LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514  "), "parts: the model only - not whole");
+    LicenseMachineTake(&m, 0x4111, b, 5);
+    static const unsigned char c[14] = { 0, ' ', ' ', '0', '9', '3', 1, '5', '1', ' ', 'x', 'y', 'z', 'w' };
+    LicenseMachineTake(&m, 0x4112, c, 14);
+    Check(LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514 180624 093 51 xy"),
+          "parts: whole; the number's spaces in front dropped, a control character a space, 11 characters at most");
+    LicenseMachineTake(&m, 0x4112, c, 2);
+    LicenseMachineTake(&m, 0x4118, a, 4);
+    LicenseMachineTake(&m, 0x4111, b, 4);
+    LicenseMachineTake(&m, 0x4105, a, 5);
+    Check(LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514 180624 093 51 xy"), "parts: short or other - unchanged");
+    static const unsigned char d[4] = { 0, '7', ' ', ' ' };
+    LicenseMachineTake(&m, 0x4112, d, 4);
+    Check(LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514 180624 7"), "parts: the spaces after dropped");
+    Check(LicenseMachineText(&m, t, 9) && !wcscmp(t, L"41800514"), "parts: cut to the room");
+    static const unsigned char e[3] = { 0, '5', '6' }, f[4] = { 0, ' ', ' ', ' ' }, g[4] = { 0, 0x7E, 0x7F, '1' };
+    LicenseMachineTake(&m, 0x4112, e, 3);
+    Check(LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514 180624 56"), "parts: a number of two characters");
+    LicenseMachineTake(&m, 0x4112, f, 4);
+    Check(!LicenseMachineText(&m, t, 64), "parts: a number of spaces only - not whole");
+    LicenseMachineTake(&m, 0x4112, g, 4);
+    Check(LicenseMachineText(&m, t, 64) && !wcscmp(t, L"41800514 180624 ~ 1"), "parts: ~ kept, DEL a space");
+    LicenseMachine q;
+    memset(&q, 0, sizeof(q));
+    LicenseMachineTake(&q, 0x4118, a, 5);
+    LicenseMachineTake(&q, 0x4111, b, 5);
+    Check(!LicenseMachineText(&q, t, 64), "parts: no number - not whole");
+    memset(&q, 0, sizeof(q));
+    LicenseMachineTake(&q, 0x4118, a, 5);
+    LicenseMachineTake(&q, 0x4112, e, 3);
+    Check(!LicenseMachineText(&q, t, 64), "parts: no date - not whole");
+}
+
+// The machine ID read from the ring (a test ring of its own name): kept once whole, never changed after.
+static void TestMachineRing(const unsigned char* a, int n1, const wchar_t* id1)
+{
+    unsigned char b[LICENSE_UNIT_MAX];
+    wchar_t got[64], id[LICENSE_ID_LEN];
+    int source = -1;
+    LicenseMachineRing(L"VestaMCUtest1");
+    Check(!LicenseMachineRead(got, 64) && !got[0], "ring: none - no machine ID");
+    int n = LicenseUnitBytes(b, sizeof(b), &source);
+    Check(source == LICENSE_SRC_PC && n == 4, "no machine ID on the PC: the volume's serial number");
+    Check(LicenseLegacyBytes(b + 8, sizeof(b) - 8) == 4 && !memcmp(b, b + 8, 4), "the old bytes: on the PC the same");
+    McuShm* r = TestRing(L"VestaMCUtest1");
+    Check(!LicenseMachineRead(got, 64), "ring: empty - none");
+    static const unsigned char x[5] = { 0, 0x41, 0x80, 0x05, 0x14 };
+    TestPost(r, 0x4118, x, 5);
+    Check(!LicenseMachineRead(got, 64), "ring: a part only - none");
+    TestMachinePost(r, "093151");
+    Check(LicenseMachineRead(got, 64) && !wcscmp(got, L"41800514 180624 093151"), "ring: the machine ID");
+    n = LicenseUnitBytes(b, sizeof(b), &source);
+    Check(source == LICENSE_SRC_MCU && n == n1 && !memcmp(a, b, n), "the unit's bytes: the machine ID's");
+    LicenseUnitId(id);
+    Check(!wcscmp(id, id1), "the unit's ID: of the machine ID");
+    TestMachinePost(r, "149000");
+    Check(LicenseMachineRead(got, 64) && !wcscmp(got, L"41800514 180624 093151"),
+          "ring: another written after - the kept one stays");
+    LicenseMachineRing(L"VestaMCUtest2");   // forgotten; a ring with two answers: the latest
+    McuShm* r2 = TestRing(L"VestaMCUtest2");
+    TestMachinePost(r2, "111111");
+    TestMachinePost(r2, "222222");
+    Check(LicenseMachineRead(got, 64) && !wcscmp(got, L"41800514 180624 222222"), "ring: the latest answer");
+    LicenseMachineRing(L"VestaMCUtest3");
+    McuShm* r3 = TestRing(L"VestaMCUtest3");
+    r3->magic = 0;
+    TestMachinePost(r3, "333333");
+    Check(!LicenseMachineRead(got, 64), "ring: not the proxy's (no magic) - none");
+    r3->magic = MCU_SHM_MAGIC;
+    TestMachinePost(r3, "444444");
+    Check(LicenseMachineRead(got, 64) && !wcscmp(got, L"41800514 180624 444444"), "ring: the proxy's again - the latest answer");
+    LicenseMachineRing(NULL);
+}
+
+// The unit's machine ID from the MCU (2026-11-25: the HAL's device id is the same on every unit): read from the MCU
+// proxy's ring, the ID made of it; the HAL's bytes only as the old key of the passwords.
 static void TestMachine()
 {
     unsigned char a[LICENSE_UNIT_MAX], b[LICENSE_UNIT_MAX];
@@ -149,24 +232,9 @@ static void TestMachine()
     LicenseIdText(b, n2, id2);
     Check(wcscmp(id1, id2) != 0, "two units' machine IDs: two IDs");
 
-    Check(LicenseMachineSet(L"41800514 180624 093151"), "the machine ID kept");
-    wchar_t got[64];
-    Check(LicenseMachineGet(got, 64) && !wcscmp(got, L"41800514 180624 093151"), "and read back");
-    int source = -1;
-    int n = LicenseUnitBytes(b, sizeof(b), &source);
-    Check(source == LICENSE_SRC_MCU && n == n1 && !memcmp(a, b, n), "the unit's bytes: the machine ID's");
-    wchar_t id[LICENSE_ID_LEN];
-    LicenseUnitId(id);
-    Check(!wcscmp(id, id1), "the unit's ID: of the machine ID");
-    Check(!LicenseMachineSet(L""), "an empty machine ID: not kept");
-    Check(LicenseMachineGet(got, 64) && !wcscmp(got, L"41800514 180624 093151"), "the kept one stays");
-
     Check(!Verify(kFile, L""), "an unknown ID (\"\"): no file fits");
-    LicenseMachineSet(NULL);   // forgotten
-    Check(!LicenseMachineGet(got, 64) && !got[0], "forgotten: none");
-    n = LicenseUnitBytes(b, sizeof(b), &source);
-    Check(source == LICENSE_SRC_PC && n == 4, "no machine ID on the PC: the volume's serial number");
-    Check(LicenseLegacyBytes(a, sizeof(a)) == 4 && !memcmp(a, b, 4), "the old bytes: on the PC the same");
+    TestMachineParts();
+    TestMachineRing(a, n1, id1);
 }
 
 static void TestPath()   // a license file read from its path (VestaHome's folder; VestaAuto reads it itself)
@@ -208,9 +276,7 @@ static void TestUnitLevel()   // this unit's level: the keys in VestaHome's fold
 
 int main()
 {
-    wchar_t kept[64] = L"";   // (the PC build of VestaHome may have kept its demo machine ID: put back at the end)
-    LicenseMachineGet(kept, 64);
-    LicenseMachineSet(NULL);
+    LicenseMachineRing(L"VestaMCUtest0");   // (never the running VestaHomePC's demo ring)
     TestMachine();
     TestId();
     TestFile();
@@ -218,8 +284,6 @@ int main()
     TestUnit();
     TestPath();
     TestUnitLevel();
-    if (kept[0])
-        LicenseMachineSet(kept);
     printf("test_vlicense: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }

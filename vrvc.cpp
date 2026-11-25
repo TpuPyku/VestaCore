@@ -187,45 +187,161 @@ static bool OnScreen(const int* p)
     return p[0] > 0 && p[0] <= 800 && p[1] > 0 && p[1] <= 480;
 }
 
-static void Seg(HDC dc, const int* a, const int* b, COLORREF c, int width)
+struct Segs {
+    RvcSeg* s;
+    int     n, cap;
+};
+
+static void Add(Segs* o, int x0, int y0, int x1, int y1, COLORREF c, int w, bool outline)
 {
-    if (!OnScreen(a) || !OnScreen(b))
+    int a[2] = { x0, y0 }, b[2] = { x1, y1 };
+    if (!OnScreen(a) || !OnScreen(b) || o->n >= o->cap)
         return;
-    HPEN pen = CreatePen(PS_SOLID, width, c);
-    HGDIOBJ op = SelectObject(dc, pen);
-    POINT pt[2] = { { a[0], a[1] }, { b[0], b[1] } };
-    Polyline(dc, pt, 2);
-    SelectObject(dc, op);
-    DeleteObject(pen);
+    RvcSeg& s = o->s[o->n++];
+    s.x0 = x0;
+    s.y0 = y0;
+    s.x1 = x1;
+    s.y1 = y1;
+    s.c = c;
+    s.w = w;
+    s.outline = outline;
 }
 
-void RvcDrawLines(HDC dc, int angle10, bool valid)
+static void AddPts(Segs* o, const int* a, const int* b, COLORREF c, int w, bool outline)
+{
+    Add(o, a[0], a[1], b[0], b[1], c, w, outline);
+}
+
+static const COLORREF kRed = RGB(255, 0, 0), kYellow = RGB(243, 255, 0), kGreen = RGB(32, 255, 0),
+                      kBlue = RGB(49, 130, 172);
+
+static COLORREF Zone(int k, bool valid)   // the static lines' colour of segment k (near to far)
+{
+    return !valid ? kBlue : k < kNear ? kRed : k < kMid ? kYellow : kGreen;
+}
+
+// A short tick inward from both sides at point k: an eighth of the corridor's width there.
+static void Ticks(Segs* o, const int* L, const int* R, int k, COLORREF c, int w, bool outline)
+{
+    int len = (R[k * 2] - L[k * 2]) / 8;
+    Add(o, L[k * 2], L[k * 2 + 1], L[k * 2] + len, L[k * 2 + 1], c, w, outline);
+    Add(o, R[k * 2], R[k * 2 + 1], R[k * 2] - len, R[k * 2 + 1], c, w, outline);
+}
+
+static void Sides(Segs* o, const int* L, const int* R, int k, COLORREF c, int w, bool outline)
+{
+    AddPts(o, L + k * 2, L + (k + 1) * 2, c, w, outline);
+    AddPts(o, R + k * 2, R + (k + 1) * 2, c, w, outline);
+}
+
+static COLORREF StockColor(bool nearPiece, bool valid)   // the shell's: the near piece red, blue without the angle
+{
+    return valid && nearPiece ? kRed : kBlue;
+}
+
+// Ticks at three points (both sides), each its colour.
+static void TicksAt(Segs* o, const int* L, const int* R, int n, const int* at, const COLORREF* c, bool outline)
+{
+    for (int i = 0; i < 3; i++)
+        if (at[i] < n)
+            Ticks(o, L, R, at[i], c[i], 6, outline);
+}
+
+static void StockSegs(Segs* o, const int* L, const int* R, int n, bool valid)
+{   // three pieces with gaps (the segment before kNear, kMid), ticks at their starts
+    for (int k = 0; k + 1 < n; k++)
+        if (k + 1 != kNear && k + 1 != kMid)
+            Sides(o, L, R, k, StockColor(k < kNear, valid), 8, false);
+    int at[3] = { 0, kNear, kMid };
+    COLORREF c[3] = { StockColor(true, valid), kBlue, kBlue };
+    TicksAt(o, L, R, n, at, c, false);
+}
+
+static void ZoneSides(Segs* o, const int* L, const int* R, int n, bool valid, int w, bool outline)
+{
+    for (int k = 0; k + 1 < n; k++)
+        Sides(o, L, R, k, Zone(k, valid), w, outline);
+}
+
+static void ModernSegs(Segs* o, const int* L, const int* R, int n, bool valid)
+{   // open, outlined, ticks at the zones' ends in their colours
+    ZoneSides(o, L, R, n, valid, 7, true);
+    int at[3] = { kNear, kMid, n - 1 };
+    COLORREF c[3] = { Zone(kNear - 1, valid), Zone(kMid - 1, valid), Zone(n - 2, valid) };
+    TicksAt(o, L, R, n, at, c, true);
+}
+
+static void ClassicSegs(Segs* o, const int* L, const int* R, int n, bool valid)
+{   // by zone with bars across at the zones' ends
+    ZoneSides(o, L, R, n, valid, 4, false);
+    for (int k = 0; k + 1 < n; k++)
+        if (k == 0 || k + 1 == kNear || k + 1 == kMid || k + 2 == n)
+            AddPts(o, L + (k + 1) * 2, R + (k + 1) * 2, Zone(k, valid), 3, false);
+}
+
+int RvcStaticSegs(const int* L, const int* R, int n, bool valid, int style, RvcSeg* out, int cap)
+{
+    Segs o = { out, 0, cap };
+    if (style == RVC_LINES_STOCK)
+        StockSegs(&o, L, R, n, valid);
+    else if (style == RVC_LINES_MODERN || style == RVC_LINES_TRACKS)
+        ModernSegs(&o, L, R, n, valid);
+    else
+        ClassicSegs(&o, L, R, n, valid);
+    return o.n;
+}
+
+static void Strips(Segs* o, const int* P, int k, COLORREF c)   // a wheel's path: two thin strips 6 px apart
+{
+    for (int d = -3; d <= 3; d += 6)
+        Add(o, P[k * 2] + d, P[k * 2 + 1], P[k * 2 + 2] + d, P[k * 2 + 3], c, 3, true);
+}
+
+int RvcTraceSegs(const int* L, const int* R, int n, int mag, int style, RvcSeg* out, int cap)
+{
+    Segs o = { out, 0, cap };
+    bool modern = style == RVC_LINES_MODERN || style == RVC_LINES_TRACKS;
+    for (int k = 0; k + 1 < n; k++) {
+        bool nearZone = k < kNear;
+        COLORREF c = nearZone || mag >= 341 ? kRed : kYellow;   // (341: the wheel near its end)
+        if (style == RVC_LINES_TRACKS) {
+            Strips(&o, L, k, c);
+            Strips(&o, R, k, c);
+        } else {
+            Sides(&o, L, R, k, c, nearZone ? 8 : modern ? 6 : 5, modern);
+        }
+    }
+    return o.n;
+}
+
+void RvcDrawSegs(HDC dc, const RvcSeg* s, int n)
+{
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < n; i++) {
+            if (!pass && !s[i].outline)
+                continue;
+            HPEN pen = CreatePen(PS_SOLID, pass ? s[i].w : s[i].w + 4, pass ? s[i].c : RGB(16, 16, 16));
+            HGDIOBJ op = SelectObject(dc, pen);
+            POINT pt[2] = { { s[i].x0, s[i].y0 }, { s[i].x1, s[i].y1 } };
+            Polyline(dc, pt, 2);
+            SelectObject(dc, op);
+            DeleteObject(pen);
+        }
+}
+
+void RvcDrawLines(HDC dc, int angle10, bool valid, int style)
 {
     if (!LoadRvs())
         return;
     static int L[kBuf * 2], Rt[kBuf * 2];
+    static RvcSeg segs[kBuf * 8];
     unsigned n = R.location(L, Rt, kPoints);
-    // the static lines: by distance zone (red, yellow, green) with bars across at the zones' ends; blue without
-    // the steering angle, as the shell's
-    static const COLORREF kZone[3] = { RGB(255, 0, 0), RGB(243, 255, 0), RGB(32, 255, 0) };
-    for (unsigned k = 0; k + 1 < n; k++) {
-        COLORREF c = !valid ? RGB(49, 130, 172) : kZone[k < kNear ? 0 : k < kMid ? 1 : 2];
-        Seg(dc, L + k * 2, L + (k + 1) * 2, c, 4);
-        Seg(dc, Rt + k * 2, Rt + (k + 1) * 2, c, 4);
-        if (k == 0 || k + 1 == kNear || k + 1 == kMid || k + 2 == n)
-            Seg(dc, L + (k + 1) * 2, Rt + (k + 1) * 2, c, 3);
-    }
+    RvcDrawSegs(dc, segs, RvcStaticSegs(L, Rt, (int)n, valid, style, segs, kBuf * 8));
     int deg = (angle10 >= 0 ? angle10 + 5 : angle10 - 5) / 10;
     if (!valid || (deg <= 5 && deg >= -5))
         return;
     R.angle((float)(deg * 0.0649));   // the road wheels' angle
     static int TL[kBuf * 2], TR[kBuf * 2];
     n = R.trace(TL, TR, kPoints);
-    int mag = deg < 0 ? -deg : deg;
-    for (unsigned k = 0; k + 1 < n; k++) {
-        bool nearZone = k < kNear;
-        COLORREF c = nearZone || mag >= 341 ? RGB(255, 0, 0) : RGB(243, 255, 0);
-        Seg(dc, TL + k * 2, TL + (k + 1) * 2, c, nearZone ? 8 : 5);
-        Seg(dc, TR + k * 2, TR + (k + 1) * 2, c, nearZone ? 8 : 5);
-    }
+    RvcDrawSegs(dc, segs, RvcTraceSegs(TL, TR, (int)n, deg < 0 ? -deg : deg, style, segs, kBuf * 8));
 }

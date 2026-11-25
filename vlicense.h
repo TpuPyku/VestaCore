@@ -14,8 +14,9 @@ enum { LICENSE_SRC_NONE, LICENSE_SRC_HAL, LICENSE_SRC_MAC, LICENSE_SRC_PC, LICEN
 enum { LICENSE_NONE, LICENSE_SUPPORTER, LICENSE_COAUTHOR };   // what a license file gives: its level, 0 - nothing
 
 // The unit's own bytes (VestaHome's and its add-ons' - the same ID in each, 2026-11-15): its machine ID from the MCU
-// (2026-11-25: the HAL's device id is the same on every unit - VH-A6R3Y-CJN2Y everywhere), kept for the boot by
-// LicenseMachineSet; none yet - 0 bytes, no ID. The PC build with no machine ID: the system volume's serial number.
+// (2026-11-25: the HAL's device id is the same on every unit - VH-A6R3Y-CJN2Y everywhere), read by each program from the
+// MCU proxy's shared ring (LicenseMachineRead: not the registry, which any registry editor changes - the user
+// 2026-11-25); none yet - 0 bytes, no ID. The PC build with no machine ID: the system volume's serial number.
 // Their count; source (may be NULL): LICENSE_SRC_*.
 int LicenseUnitBytes(unsigned char* buf, int cap, int* source);
 // The old bytes (until 2026-11-25): the HAL's device id, else the adapters' MAC addresses; the PC - as above. Only the
@@ -24,10 +25,19 @@ int LicenseLegacyBytes(unsigned char* buf, int cap);
 // The machine ID's text (VestaHome: "<0x4118> <0x4111> <0x4112>" as "О системе" shows it) as the unit's bytes; 0 - not
 // one (empty, not printable ASCII, longer than LICENSE_MACHINE_MAX).
 int LicenseMachineBytes(const wchar_t* text, unsigned char* buf, int cap);
-// The machine ID kept for this boot (the unit: HKLM\Software\Vesta "Machine" - the registry starts afresh at each
-// boot; the PC: HKCU): VestaHome puts it when the MCU has told it, the add-ons read it. NULL - forgotten. False - not one.
-bool LicenseMachineSet(const wchar_t* text);
-bool LicenseMachineGet(wchar_t* text, int cap);   // false: none kept ("")
+// The machine ID's parts from the MCU's messages (0x4118 00 <4 bytes>, 0x4111 00 20 <3 bytes>, 0x4112 00 <text>, as the
+// stock "Info" asks them: SPApi_SendRadioRequestProductInfo); other messages - nothing.
+struct LicenseMachine {
+    wchar_t id[16], date[8], num[12];
+};
+void LicenseMachineTake(LicenseMachine* m, int msgId, const unsigned char* p, int len);
+// Its text as "Details" shows it ("—" none yet; a part may be missing): true when all of it is there.
+bool LicenseMachineText(const LicenseMachine* m, wchar_t* out, int n);
+// The machine ID from the MCU proxy's ring (vmcushm.h), kept by the program once whole (it never changes; what is
+// written into the ring after that changes nothing): false - not there (no proxy, or nobody asked the MCU lately).
+bool LicenseMachineRead(wchar_t* text, int cap);
+// Tests: the ring's name instead of VestaMCU2 (NULL - back), and the kept machine ID forgotten.
+void LicenseMachineRing(const wchar_t* name);
 // The unit's ID shown to the user: SHA-256 of its bytes, 50 bits in 10 letters.
 void LicenseIdText(const unsigned char* hw, int n, wchar_t* out);
 // This unit's ID ("" - its machine ID not known yet: no license fits).
