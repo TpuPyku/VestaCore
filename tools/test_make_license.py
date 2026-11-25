@@ -96,5 +96,42 @@ class Sign(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
 
 
+class SignInstaller(unittest.TestCase):   # the installer's signature (2026-11-25): VestaHome's "Обновить" checks it
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.priv = os.path.join(self.dir, 'p.pem')
+        ml.keygen(self.priv, os.path.join(self.dir, 'k.inc'))
+        pem = open(self.priv, 'rb').read()
+        self.pub = serialization.load_pem_private_key(pem, password=None).public_key()
+        self.exe = os.path.join(self.dir, 'VestaHomeInstall.exe')
+        open(self.exe, 'wb').write(b'MZ...' + b'VHINSTVER:1.1.261130' + bytes(3) + b'tail')
+
+    def test_signed(self):
+        out = os.path.join(self.dir, 'VestaHomeInstall.sig')
+        ver = ml.sign_installer(self.priv, self.exe, out)
+        self.assertEqual(ver, '1.1.261130')
+        lines = open(out, encoding='ascii').read().splitlines()
+        self.assertEqual(lines[0], 'VestaHome installer signature')
+        f = dict(l.split('=', 1) for l in lines[1:])
+        import hashlib
+        sha = hashlib.sha256(open(self.exe, 'rb').read()).hexdigest()
+        self.assertEqual((f['version'], f['sha256']), ('1.1.261130', sha))
+        sig = base64.b64decode(f['sig'])
+        der = encode_dss_signature(int.from_bytes(sig[:32], 'big'), int.from_bytes(sig[32:], 'big'))
+        self.pub.verify(der, ('VestaHome installer 1|1.1.261130|' + sha).encode(), ec.ECDSA(hashes.SHA256()))
+
+    def test_no_mark(self):
+        open(self.exe, 'wb').write(b'MZ no mark')
+        with self.assertRaises(ValueError):
+            ml.sign_installer(self.priv, self.exe, os.path.join(self.dir, 'x.sig'))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'x.sig')))
+
+    def test_version_of(self):
+        self.assertEqual(ml.installer_version(b'..VHINSTVER:1.2.3\x00..'), '1.2.3')
+        self.assertIsNone(ml.installer_version(b'VHINSTVER:\x00'))
+        self.assertIsNone(ml.installer_version(b'VHINSTVER:1.2'))   # (no end: not a mark)
+        self.assertEqual(ml.installer_version(b'VHINSTVER:\x00 VestaHome inside VHINSTVER:2.0\x00'), '2.0')   # (VestaHome's empty mark inside the installer)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -86,6 +86,32 @@ static int FileLevel(const char* text, int len)   // "level=1|2"; none - a subsc
     return n == 1 && (*v == '1' || *v == '2') ? *v - '0' : LICENSE_NONE;
 }
 
+bool LicenseSigned(const char* sigB64, int sigLen, const char* msg, int m, const unsigned char* pub, int publen)
+{
+    unsigned char sig[64];
+    if (Base64(sigB64, sigLen, sig, sizeof(sig)) != 64)
+        return false;
+    if (!pub) {
+        pub = kLicensePub;
+        publen = sizeof(kLicensePub);
+    }
+    unsigned char h[32];
+    br_sha256_context c;
+    br_sha256_init(&c);
+    br_sha256_update(&c, msg, m);
+    br_sha256_out(&c, h);
+    br_ec_public_key pk;
+    pk.curve = BR_EC_secp256r1;
+    pk.q = (unsigned char*)pub;
+    pk.qlen = publen;
+    return br_ecdsa_i31_vrfy_raw(&br_ec_p256_m31, h, sizeof(h), &pk, sig, sizeof(sig)) == 1;
+}
+
+bool LicenseField(const char* text, int len, const char* key, const char** v, int* vlen)
+{
+    return Field(text, len, key, v, vlen);
+}
+
 int LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned char* pub, int publen)
 {
     const char *fid, *fsig;
@@ -101,19 +127,7 @@ int LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned c
             return LICENSE_NONE;   // (another unit's file)
         msg[m++] = fid[i];
     }
-    unsigned char sig[64];
-    if (Base64(fsig, sigLen, sig, sizeof(sig)) != 64)
-        return LICENSE_NONE;
-    unsigned char h[32];
-    br_sha256_context c;
-    br_sha256_init(&c);
-    br_sha256_update(&c, msg, m);
-    br_sha256_out(&c, h);
-    br_ec_public_key pk;
-    pk.curve = BR_EC_secp256r1;
-    pk.q = (unsigned char*)pub;
-    pk.qlen = publen;
-    return br_ecdsa_i31_vrfy_raw(&br_ec_p256_m31, h, sizeof(h), &pk, sig, sizeof(sig)) == 1 ? level : LICENSE_NONE;
+    return pub && LicenseSigned(fsig, sigLen, msg, m, pub, publen) ? level : LICENSE_NONE;
 }
 
 int LicenseValid(const char* text, int len, const wchar_t* id)

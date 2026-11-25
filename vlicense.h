@@ -45,6 +45,10 @@ void LicenseUnitId(wchar_t* out);
 // A license file's text (len bytes) for this ID, against the public key `pub` (65 bytes, uncompressed P-256): its
 // level (LICENSE_*; LICENSE_NONE - not valid, true-or-false use is "any level").
 int LicenseVerify(const char* text, int len, const wchar_t* id, const unsigned char* pub, int publen);
+// A signature (base64 of r||s) of msg by the key `pub` (NULL - the author's, vlicense_key.inc): ECDSA P-256 over SHA-256.
+bool LicenseSigned(const char* sigB64, int sigLen, const char* msg, int m, const unsigned char* pub, int publen);
+// The value of the line "<key>" (e.g. "sig=") in text: its start and length; false - none.
+bool LicenseField(const char* text, int len, const char* key, const char** v, int* vlen);
 // The same against the author's key (vlicense_key.inc).
 int LicenseValid(const char* text, int len, const wchar_t* id);
 // A license file at `path` (found: whether there is one; may be NULL) - against `pub`, or the author's key.

@@ -1,4 +1,4 @@
-"""make_license.py - VestaHome's support license (vlicense.h): the author's side.
+r"""make_license.py - VestaHome's support license (vlicense.h): the author's side.
 
   keygen <private.pem> <vlicense_key.inc>   a new key pair: the private key (never into a repo - VestaCore is public),
                                             the public one as C bytes for vlicense.cpp
@@ -8,6 +8,8 @@
                                             level 1 (default) - a subscriber: Android Auto's splash gone;
                                             2 - a co-author (Boosty «Соавторы»): also the smart home add-on
   id <hex of the unit's HAL device id>      the ID VestaHome shows for those bytes (LicenseIdText)
+  sign-installer <private.pem> <VestaHomeInstall.exe> <VestaHomeInstall.sig>   the installer's signature (its
+                                            version mark and SHA-256): VestaHome's "Обновить" runs only a signed one
 
 The file: "VestaHome support license", "id=<ID>", ["level=<n>" when above 1,] "sig=<base64 of r||s>" - ECDSA P-256
 over SHA-256 of "VestaHome support <level>|<ID>" (the keys made before levels, 2026-11-18, are level 1). Needs the
@@ -74,6 +76,40 @@ def write_key(priv_path, typed_id, level, out_path):
     return uid
 
 
+MARK = b'VHINSTVER:'   # the installer's version mark (VestaHomeInstall: "VHINSTVER:<version>" and a 0 byte)
+
+
+def installer_version(data):
+    """The version the installer's bytes carry; None - no mark (or an empty or unended one)."""
+    at = data.find(MARK)
+    while at >= 0:   # (the first one with a version: VestaHome inside the installer has the mark empty)
+        end = data.find(bytes(1), at + len(MARK))
+        ver = data[at + len(MARK):end] if end > 0 else b''
+        if ver and len(ver) < 32:
+            return ver.decode('ascii')
+        at = data.find(MARK, at + 1)
+    return None
+
+
+def sign_installer(priv_path, exe_path, out_path):
+    """VestaHomeInstall.sig for the installer (2026-11-25: VestaHome's "Обновить" runs it only with this): ECDSA P-256
+    over SHA-256 of "VestaHome installer 1|<version>|<sha256 hex of the exe>". Its version back; ValueError - no
+    version mark in the exe (nothing written)."""
+    data = open(exe_path, 'rb').read()
+    ver = installer_version(data)
+    if not ver:
+        raise ValueError('no version mark (VHINSTVER:) in %s' % exe_path)
+    sha = hashlib.sha256(data).hexdigest()
+    with open(key_path(priv_path), 'rb') as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
+    r, s = decode_dss_signature(key.sign(('VestaHome installer 1|%s|%s' % (ver, sha)).encode('ascii'),
+                                         ec.ECDSA(hashes.SHA256())))
+    sig = base64.b64encode(r.to_bytes(32, 'big') + s.to_bytes(32, 'big')).decode('ascii')
+    with open(out_path, 'w', newline='\n') as f:
+        f.write('VestaHome installer signature\nversion=%s\nsha256=%s\nsig=%s\n' % (ver, sha, sig))
+    return ver
+
+
 def keygen(priv_path, inc_path):
     if os.path.exists(priv_path):
         sys.exit('%s exists - not overwritten (the licenses made with it would stop working)' % priv_path)
@@ -99,6 +135,11 @@ def main(a):
     elif len(a) in (4, 5) and a[0] == 'sign':
         try:
             print(write_key(a[1], a[2], int(a[4]) if len(a) == 5 else 1, a[3]))
+        except (ValueError, OSError) as e:
+            sys.exit(str(e))
+    elif len(a) == 4 and a[0] == 'sign-installer':
+        try:
+            print(sign_installer(a[1], a[2], a[3]))
         except (ValueError, OSError) as e:
             sys.exit(str(e))
     elif len(a) == 2 and a[0] == 'id':
