@@ -5,6 +5,11 @@
 static const wchar_t* kRu[VKEYS_ROWS] = { L"1234567890-_", L"йцукенгшщзхъ", L"фывапролджэё", L"ячсмитьбю.,!" };
 static const wchar_t* kEn[VKEYS_ROWS] = { L"1234567890-_", L"qwertyuiop()", L"asdfghjkl:;\"", L"zxcvbnm.,/\\=" };
 static const wchar_t  kSym[] = L"!@#$%&*+?|~'";   // the digits' row with Shift (the configs: # @ & ? % + |)
+// Each key's second character, a long press (the user 2026-11-26: as Android's keyboard - drawn small in the key's
+// corner): with them each layout has every printable ASCII character, and № ₽ « » — … ° (ь: ъ, е: ё). The digits' row
+// with Shift shows kSym - its second is then the digit.
+static const wchar_t* kRuAlt[VKEYS_ROWS] = { L"!@#$%^&*()—=", L"+`~[ё{}<>'\"|", L"@#$%&*°\\/:;]", L"№₽«»—…ъ-_:;?" };
+static const wchar_t* kEnAlt[VKEYS_ROWS] = { L"!@#$%^&*()—=", L"+`~[]{}<>'<>", L"@#$%&*°|?'`~", L"€£©…—№?…;?|+" };
 
 void VKeysOpen(VKeys* k, const wchar_t* text, int cap)
 {
@@ -26,6 +31,25 @@ wchar_t VKeysChar(const VKeys* k, int row, int col)
     if (k->shift)
         CharUpperBuff(ch, 1);
     return ch[0];
+}
+
+wchar_t VKeysAlt(const VKeys* k, int row, int col)
+{
+    if (row == 0 && k->shift)
+        return kRu[0][col];   // the digit (the same in both layouts)
+    wchar_t ch[2] = { (k->en ? kEnAlt : kRuAlt)[row][col], 0 };
+    if (k->shift)
+        CharUpperBuff(ch, 1);
+    return ch[0];
+}
+
+wchar_t VKeysAltFor(const VKeys* k, wchar_t shown)
+{
+    for (int r = 0; r < VKEYS_ROWS; r++)
+        for (int c = 0; c < VKeysRowLen(k, r); c++)
+            if (VKeysChar(k, r, c) == shown)
+                return VKeysAlt(k, r, c);
+    return 0;
 }
 
 static int Cursor(const VKeys* k, int n)   // the cursor within the text

@@ -1,4 +1,4 @@
-// vkeys.h - VestaCore: the on-screen keyboard's text and cursor (VestaHome's keyboard; the user 2026-10-29: OSMapsCE's
+﻿// vkeys.h - VestaCore: the on-screen keyboard's text and cursor (VestaHome's keyboard; the user 2026-10-29: OSMapsCE's
 // search too). The text is edited at the cursor; the finger puts and drags the cursor anywhere on the field, the
 // field shows the text from `view`, as far as the cursor needs. Each program draws the keys and the field its own way;
 // the keys are 4 rows of 12 (VKeysChar), then Shift, the language, the space and backspace.
@@ -20,6 +20,8 @@ struct VKeys {
 void    VKeysOpen(VKeys* k, const wchar_t* text, int cap);   // the cursor at the text's end, Russian, no Shift
 wchar_t VKeysChar(const VKeys* k, int row, int col);         // a key as shown (Shift: the digits' row - symbols, capitals)
 int     VKeysRowLen(const VKeys* k, int row);                // keys in a row (0: no such row)
+wchar_t VKeysAlt(const VKeys* k, int row, int col);          // a key's second character (a long press)
+wchar_t VKeysAltFor(const VKeys* k, wchar_t shown);         // the second of the key showing `shown` (0 none)
 void    VKeysType(VKeys* k, wchar_t ch);                     // at the cursor (Shift: a capital, Shift off)
 void    VKeysBack(VKeys* k);                                 // the character before the cursor
 void    VKeysCursorAt(VKeys* k, int x, int fieldW);          // the finger at x from the field's left (the last layout)

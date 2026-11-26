@@ -150,12 +150,58 @@ static void FieldChecks()
     DeleteDC(dc);
 }
 
+// The second characters (a long press, the user 2026-11-26: as Android's keyboard): every key has one; each layout
+// with them gives every printable ASCII character; Shift makes a letter's capital.
+static void AltChecks()
+{
+    VKeys k;
+    VKeysOpen(&k, L"", 10);
+    for (int lang = 0; lang < 2; lang++) {
+        k.en = lang == 1;
+        bool all = true, differ = true;
+        wchar_t seen[128] = { 0 };
+        for (int r = 0; r < VKEYS_ROWS; r++)
+            for (int c = 0; c < VKeysRowLen(&k, r); c++) {
+                wchar_t a = VKeysAlt(&k, r, c), m = VKeysChar(&k, r, c);
+                all = all && a != 0;
+                differ = differ && a != m;
+                if (a < 128)
+                    seen[a] = 1;
+                if (m < 128)
+                    seen[m] = 1;
+            }
+        Check(all, lang ? "EN: every key has a second character" : "RU: every key has a second character");
+        Check(differ, lang ? "EN: the second is not the key itself" : "RU: the second is not the key itself");
+        bool ascii = true;
+        for (int ch = 0x21; ch < 0x7F; ch++)
+            if (!seen[ch] && !(ch >= L'a' && ch <= L'z') && !(ch >= L'A' && ch <= L'Z')) {
+                ascii = false;
+                printf("  %s: no '%c'\n", lang ? "EN" : "RU", ch);
+            }
+        Check(ascii, "every printable ASCII character in the layout");
+    }
+    k.en = false;
+    Check(VKeysAlt(&k, 0, 0) == L'!' && VKeysAlt(&k, 0, 9) == L')', "the digits: ! .. )");
+    Check(VKeysAlt(&k, 3, 6) == L'ъ' && VKeysAlt(&k, 3, 0) == L'№', "ь: ъ, я: №");
+    Check(VKeysAltFor(&k, L'е') == L'ё', "е: ё (as Android's), ё keeps its own key too");
+    Check(VKeysAltFor(&k, L'ь') == L'ъ' && VKeysAltFor(&k, L'1') == L'!', "by the key's character");
+    Check(VKeysAltFor(&k, L' ') == 0 && VKeysAltFor(&k, L'q') == 0, "the space, another layout's key: none");
+    k.shift = true;
+    Check(VKeysAlt(&k, 3, 6) == L'Ъ', "Shift: the second letter's capital");
+    Check(VKeysAltFor(&k, L'Ь') == L'Ъ', "Shift: found by the capital shown");
+    Check(VKeysAlt(&k, 0, 0) == L'1' && VKeysAltFor(&k, L'@') == L'2', "Shift's symbols row: the digit as the second");
+    k.shift = false;
+    k.en = true;
+    Check(VKeysAlt(&k, 1, 0) == L'+' && VKeysAltFor(&k, L'l') == L'?', "EN: q: +, l: ?");
+}
+
 int main()
 {
     EditChecks();
     ShiftChecks();
     KeyChecks();
     FieldChecks();
+    AltChecks();
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
