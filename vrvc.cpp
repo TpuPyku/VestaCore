@@ -182,9 +182,33 @@ static bool LoadRvs()
     return s_rvs > 0;
 }
 
-static bool OnScreen(const int* p)
+// One side's limit on the segment's t (0..1, Liang-Barsky): p t <= q; false - nothing of it inside.
+static bool ClipEdge(double p, double q, double* t0, double* t1)
 {
-    return p[0] > 0 && p[0] <= 800 && p[1] > 0 && p[1] <= 480;
+    if (p == 0)
+        return q >= 0;
+    double t = q / p;
+    if (p < 0)
+        *t0 = t > *t0 ? t : *t0;
+    else
+        *t1 = t < *t1 ? t : *t1;
+    return *t0 <= *t1;
+}
+
+// The segment cut to the screen (0..799, 0..479), its ends in place; false - all of it off the screen (HU photo
+// 2026-11-26: a piece with one end past the edge was dropped whole - the right line short of the corner).
+static bool ClipToScreen(int* x0, int* y0, int* x1, int* y1)
+{
+    double dx = *x1 - *x0, dy = *y1 - *y0, t0 = 0, t1 = 1;
+    if (!ClipEdge(-dx, *x0, &t0, &t1) || !ClipEdge(dx, 799 - *x0, &t0, &t1) || !ClipEdge(-dy, *y0, &t0, &t1)
+        || !ClipEdge(dy, 479 - *y0, &t0, &t1))
+        return false;
+    int ax = *x0, ay = *y0;
+    *x0 = (int)(ax + t0 * dx + 0.5);
+    *y0 = (int)(ay + t0 * dy + 0.5);
+    *x1 = (int)(ax + t1 * dx + 0.5);
+    *y1 = (int)(ay + t1 * dy + 0.5);
+    return true;
 }
 
 struct Segs {
@@ -194,8 +218,7 @@ struct Segs {
 
 static void Add(Segs* o, int x0, int y0, int x1, int y1, COLORREF c, int w, bool outline)
 {
-    int a[2] = { x0, y0 }, b[2] = { x1, y1 };
-    if (!OnScreen(a) || !OnScreen(b) || o->n >= o->cap)
+    if (o->n >= o->cap || !ClipToScreen(&x0, &y0, &x1, &y1))
         return;
     RvcSeg& s = o->s[o->n++];
     s.x0 = x0;

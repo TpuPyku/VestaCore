@@ -83,7 +83,46 @@ static void TestStyles()
     Check(RvcStaticSegs(s_L, s_R, 27, true, RVC_LINES_CLASSIC, s, 10) == 10, "no more than the room");
     s_L[0] = -5;
     n = RvcStaticSegs(s_L, s_R, 27, true, RVC_LINES_CLASSIC, s, 200);
-    Check(n == 26 * 2 + 4 - 1, "off the screen: left out");
+    Check(n == 26 * 2 + 4 && s[0].x0 == 0, "an end off the screen: cut at its edge (was: left out)");
+    // HU photo 2026-11-26: the right line's near piece missing - its near point past x 800, the piece dropped
+    Corridor(27);
+    s_R[0] = 860;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 52 && s[1].x0 == 799 && s[1].y0 == 466 && s[1].x1 == 692 && s[1].y1 == 460,
+          "past the right edge: cut at x 799 on the line");
+    s_R[1] = 540;
+    s_R[0] = 700;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 52 && s[1].y0 == 479 && s[1].x0 == 694, "below the bottom: cut at y 479");
+    s_R[0] = 900;
+    s_R[2] = 850;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 51 && s[1].x0 == s_L[2], "all of it off the screen: left out");
+    Corridor(27);
+    s_L[0] = -40;
+    s_L[2] = -10;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 51 && s[0].x0 == s_R[0], "all of it left of the screen: left out");
+    s_L[0] = -5;
+    s_L[2] = -5;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 51 && s[0].x0 == s_R[0], "upright left of the screen: left out");
+    Corridor(27);
+    s_L[0] = 900;
+    s_L[2] = 900;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 51 && s[0].x0 == s_R[0], "upright right of the screen: left out");
+    Corridor(27);
+    s_L[1] = -30;
+    s_L[3] = -20;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 51 && s[0].x0 == s_R[0], "above the screen: left out");
+    Corridor(27);
+    s_L[1] = 0;
+    s_L[3] = 0;
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
+    Check(n == 52 && s[0].y0 == 0 && s[0].y1 == 0 && s[0].x1 == 108, "along the top edge: kept");
+    Corridor(27);
 
     Corridor(27);
     n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_CLASSIC, s, 200);
