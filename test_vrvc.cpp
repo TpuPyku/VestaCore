@@ -152,6 +152,33 @@ static void TestExact()   // where each look puts its lines (the corridor of Cor
     Check(s[8].w == 6 && s[0].w == 8, "trajectory modern: 6 px far, 8 near");
 }
 
+static bool Same(const RvcSeg* a, const RvcSeg* b, int n)   // field by field (the struct's padding is garbage)
+{
+    for (int i = 0; i < n; i++)
+        if (a[i].x0 != b[i].x0 || a[i].y0 != b[i].y0 || a[i].x1 != b[i].x1 || a[i].y1 != b[i].y1 || a[i].c != b[i].c ||
+            a[i].w != b[i].w || a[i].outline != b[i].outline)
+            return false;
+    return true;
+}
+
+static void TestTraceOnly()   // only the trajectory (2026-11-26, the user: a look without the static lines)
+{
+    RvcSeg s[200], m[200];
+    Corridor(27);
+    Check(RvcStaticSegs(s_L, s_R, 27, true, RVC_LINES_TRACE, s, 200) == 0, "trace only: no static lines");
+    int n = RvcStaticSegs(s_L, s_R, 27, false, RVC_LINES_TRACE, s, 200);
+    int k = RvcStaticSegs(s_L, s_R, 27, false, RVC_LINES_MODERN, m, 200);
+    Check(n == k && n > 0 && Same(s, m, n), "trace only, no angle: modern's blue corridor");
+    n = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_TRACE, s, 200);
+    k = RvcTraceSegs(s_L, s_R, 27, 100, RVC_LINES_MODERN, m, 200);
+    Check(n == k && Same(s, m, n), "trace only: the trajectory as modern's");
+    Check(RvcTraceShown(0, true, RVC_LINES_TRACE), "trace only: the wheel straight - the trajectory still");
+    Check(!RvcTraceShown(30, false, RVC_LINES_TRACE), "no angle: no trajectory");
+    Check(!RvcTraceShown(5, true, RVC_LINES_CLASSIC) && !RvcTraceShown(-5, true, RVC_LINES_MODERN),
+          "the other looks: within 5 degrees none");
+    Check(RvcTraceShown(6, true, RVC_LINES_CLASSIC) && RvcTraceShown(-6, true, RVC_LINES_TRACKS), "past 5: shown");
+}
+
 static void TestDraw()   // the segments drawn: an outlined one dark around, the plain one without
 {
     HDC dc = CreateCompatibleDC(NULL);
@@ -189,6 +216,7 @@ int main()
     Check(RvcInputs(7, in) == 2 && in[0] == 0 && in[1] == 1, "a stray number: as nothing found");
     TestStyles();
     TestExact();
+    TestTraceOnly();
     TestDraw();
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;

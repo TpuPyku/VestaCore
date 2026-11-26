@@ -21,8 +21,10 @@ COLORREF RvcKey();             // the colour key: where the screen has it, the c
 // The guide lines' look (2026-11-25, the user: one of four in "Car"): classic - the corridor closed by bars across
 // at the zones' ends (red, yellow, green), thin; stock - as the stock shell: blue pieces, the near one red, a short
 // tick inward at each piece's near end, thick; modern - open, thick, outlined dark, the zones' colours, ticks instead
-// of bars; tracks - modern with the trajectory as two thin strips per wheel. All pixels opaque (the colour key).
-enum { RVC_LINES_CLASSIC, RVC_LINES_STOCK, RVC_LINES_MODERN, RVC_LINES_TRACKS, RVC_LINES_COUNT };
+// of bars; tracks - modern with the trajectory as two thin strips per wheel; trace (2026-11-26, the user: without the
+// static lines) - only modern's trajectory, the wheel straight too (no angle: modern's blue corridor, not nothing).
+// All pixels opaque (the colour key).
+enum { RVC_LINES_CLASSIC, RVC_LINES_STOCK, RVC_LINES_MODERN, RVC_LINES_TRACKS, RVC_LINES_TRACE, RVC_LINES_COUNT };
 struct RvcSeg {
     int      x0, y0, x1, y1;
     COLORREF c;
@@ -35,6 +37,8 @@ struct RvcSeg {
 int RvcStaticSegs(const int* L, const int* R, int n, bool valid, int style, RvcSeg* out, int cap);
 // The trajectory's segments (the wheels' paths, n points a side); mag = the steering wheel's angle, degrees.
 int RvcTraceSegs(const int* L, const int* R, int n, int mag, int style, RvcSeg* out, int cap);
+// The trajectory drawn at all: the angle fresh and (trace only: always) past 5 degrees (deg: the wheel's, signed).
+bool RvcTraceShown(int deg, bool valid, int style);
 // Segments into dc: the dark outlines (RGB 16,16,16, 4 px wider) first, then the lines over them.
 void RvcDrawSegs(HDC dc, const RvcSeg* s, int n);
 // The guide lines into dc (800 x 480): angle10 = the steering wheel's angle in tenths of a degree, valid = it is

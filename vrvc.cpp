@@ -282,9 +282,11 @@ static void ClassicSegs(Segs* o, const int* L, const int* R, int n, bool valid)
 int RvcStaticSegs(const int* L, const int* R, int n, bool valid, int style, RvcSeg* out, int cap)
 {
     Segs o = { out, 0, cap };
+    if (style == RVC_LINES_TRACE && valid)
+        return 0;
     if (style == RVC_LINES_STOCK)
         StockSegs(&o, L, R, n, valid);
-    else if (style == RVC_LINES_MODERN || style == RVC_LINES_TRACKS)
+    else if (style >= RVC_LINES_MODERN && style <= RVC_LINES_TRACE)
         ModernSegs(&o, L, R, n, valid);
     else
         ClassicSegs(&o, L, R, n, valid);
@@ -300,7 +302,7 @@ static void Strips(Segs* o, const int* P, int k, COLORREF c)   // a wheel's path
 int RvcTraceSegs(const int* L, const int* R, int n, int mag, int style, RvcSeg* out, int cap)
 {
     Segs o = { out, 0, cap };
-    bool modern = style == RVC_LINES_MODERN || style == RVC_LINES_TRACKS;
+    bool modern = style >= RVC_LINES_MODERN && style <= RVC_LINES_TRACE;
     for (int k = 0; k + 1 < n; k++) {
         bool nearZone = k < kNear;
         COLORREF c = nearZone || mag >= 341 ? kRed : kYellow;   // (341: the wheel near its end)
@@ -312,6 +314,11 @@ int RvcTraceSegs(const int* L, const int* R, int n, int mag, int style, RvcSeg* 
         }
     }
     return o.n;
+}
+
+bool RvcTraceShown(int deg, bool valid, int style)
+{
+    return valid && (style == RVC_LINES_TRACE || deg > 5 || deg < -5);
 }
 
 void RvcDrawSegs(HDC dc, const RvcSeg* s, int n)
@@ -338,7 +345,7 @@ void RvcDrawLines(HDC dc, int angle10, bool valid, int style)
     unsigned n = R.location(L, Rt, kPoints);
     RvcDrawSegs(dc, segs, RvcStaticSegs(L, Rt, (int)n, valid, style, segs, kBuf * 8));
     int deg = (angle10 >= 0 ? angle10 + 5 : angle10 - 5) / 10;
-    if (!valid || (deg <= 5 && deg >= -5))
+    if (!RvcTraceShown(deg, valid, style))
         return;
     R.angle((float)(deg * 0.0649));   // the road wheels' angle
     static int TL[kBuf * 2], TR[kBuf * 2];
