@@ -2,14 +2,20 @@
 #include "vkeys.h"
 #include <string.h>
 
-static const wchar_t* kRu[VKEYS_ROWS] = { L"1234567890-_", L"йцукенгшщзхъ", L"фывапролджэё", L"ячсмитьбю.,!" };
-static const wchar_t* kEn[VKEYS_ROWS] = { L"1234567890-_", L"qwertyuiop()", L"asdfghjkl:;\"", L"zxcvbnm.,/\\=" };
-static const wchar_t  kSym[] = L"!@#$%&*+?|~'";   // the digits' row with Shift (the configs: # @ & ? % + |)
-// Each key's second character, a long press (the user 2026-11-26: as Android's keyboard - drawn small in the key's
-// corner): with them each layout has every printable ASCII character, and № ₽ « » — … ° (ь: ъ, е: ё). The digits' row
-// with Shift shows kSym - its second is then the digit.
-static const wchar_t* kRuAlt[VKEYS_ROWS] = { L"!@#$%^&*()—=", L"+`~[ё{}<>'\"|", L"@#$%&*°\\/:;]", L"№₽«»—…ъ-_:;?" };
-static const wchar_t* kEnAlt[VKEYS_ROWS] = { L"!@#$%^&*()—=", L"+`~[]{}<>'<>", L"@#$%&*°|?'`~", L"€£©…—№?…;?|+" };
+// The keys as a PC's (the user 2026-11-26): Russian ЙЦУКЕН with ё left of 1, English QWERTY; rows of 13, 13, 11 and
+// 10. Each key: its own character, then its second and third (' ' none) - a long press shows them in a bubble, the
+// finger picks one. With them each layout holds every printable ASCII character (and № « » — … ° €).
+struct KeyRow { const wchar_t* own; const wchar_t* second; const wchar_t* third; };
+static const KeyRow kRu[VKEYS_ROWS] = {
+    { L"ё1234567890-=", L"`!\"№;%:?*()_+", L"~ @#$ ^&  °— " },
+    { L"йцукенгшщзхъ\\", L"          []/", L"          {}|" },
+    { L"фывапролджэ", L"          '", L"           " },
+    { L"ячсмитьбю.", L"       <>,", L"       «»…" } };
+static const KeyRow kEn[VKEYS_ROWS] = {
+    { L"`1234567890-=", L"~!@#$%^&*()_+", L"          °— " },
+    { L"qwertyuiop[]\\", L"  €       {}|", L"             " },
+    { L"asdfghjkl;'", L"         :\"", L"           " },
+    { L"zxcvbnm,./", L"       <>?", L"       «»…" } };
 
 void VKeysOpen(VKeys* k, const wchar_t* text, int cap)
 {
@@ -22,34 +28,60 @@ void VKeysOpen(VKeys* k, const wchar_t* text, int cap)
 
 int VKeysRowLen(const VKeys* k, int row)
 {
-    return row >= 0 && row < VKEYS_ROWS ? (int)wcslen((k->en ? kEn : kRu)[row]) : 0;
+    return row >= 0 && row < VKEYS_ROWS ? (int)wcslen((k->en ? kEn : kRu)[row].own) : 0;
+}
+
+static wchar_t Upper(wchar_t c)
+{
+    CharUpperBuff(&c, 1);
+    return c;
+}
+
+// Shift as a PC's: a letter's capital; a sign gives its second (1: !, [: {) - and its own is then the second.
+static bool Swapped(const VKeys* k, int row, int col)
+{
+    const KeyRow& r = (k->en ? kEn : kRu)[row];
+    return k->shift && Upper(r.own[col]) == r.own[col] && r.second[col] != L' ';
 }
 
 wchar_t VKeysChar(const VKeys* k, int row, int col)
 {
-    wchar_t ch[2] = { row == 0 && k->shift ? kSym[col] : (k->en ? kEn : kRu)[row][col], 0 };
-    if (k->shift)
-        CharUpperBuff(ch, 1);
-    return ch[0];
+    const KeyRow& r = (k->en ? kEn : kRu)[row];
+    if (Swapped(k, row, col))
+        return r.second[col];
+    return k->shift ? Upper(r.own[col]) : r.own[col];
 }
 
-wchar_t VKeysAlt(const VKeys* k, int row, int col)
+int VKeysAlts(const VKeys* k, int row, int col, wchar_t* out)
 {
-    if (row == 0 && k->shift)
-        return kRu[0][col];   // the digit (the same in both layouts)
-    wchar_t ch[2] = { (k->en ? kEnAlt : kRuAlt)[row][col], 0 };
-    if (k->shift)
-        CharUpperBuff(ch, 1);
-    return ch[0];
+    const KeyRow& r = (k->en ? kEn : kRu)[row];
+    wchar_t two[2] = { Swapped(k, row, col) ? r.own[col] : r.second[col], r.third[col] };
+    int n = 0;
+    for (int i = 0; i < 2; i++)
+        if (two[i] != L' ')
+            out[n++] = two[i];
+    return n;
 }
 
-wchar_t VKeysAltFor(const VKeys* k, wchar_t shown)
+int VKeysAltsFor(const VKeys* k, wchar_t shown, wchar_t* out)
 {
     for (int r = 0; r < VKEYS_ROWS; r++)
         for (int c = 0; c < VKeysRowLen(k, r); c++)
             if (VKeysChar(k, r, c) == shown)
-                return VKeysAlt(k, r, c);
+                return VKeysAlts(k, r, c, out);
     return 0;
+}
+
+int VKeysBubbleX(int keyX, int keyW, int n, int cellW, int screenW)
+{
+    int x = keyX + keyW / 2 - n * cellW / 2;
+    return x < 0 ? 0 : x > screenW - n * cellW ? screenW - n * cellW : x;
+}
+
+int VKeysBubbleSel(int fingerX, int bubbleX, int cellW, int n)
+{
+    int i = fingerX < bubbleX ? 0 : (fingerX - bubbleX) / cellW;
+    return i < n ? i : n - 1;
 }
 
 static int Cursor(const VKeys* k, int n)   // the cursor within the text

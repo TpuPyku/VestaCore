@@ -72,15 +72,19 @@ static void KeyChecks()
 {
     VKeys k;
     VKeysOpen(&k, L"", 10);
-    Check(VKeysChar(&k, 1, 0) == L'й' && VKeysChar(&k, 0, 0) == L'1' && VKeysChar(&k, 2, 11) == L'ё',
-          "the Russian keys");
-    Check(VKeysRowLen(&k, 0) == 12 && VKeysRowLen(&k, 1) == 12 && VKeysRowLen(&k, 4) == 0 &&
-          VKeysRowLen(&k, -1) == 0, "12 keys a row, 4 rows");
+    Check(VKeysChar(&k, 0, 0) == L'ё' && VKeysChar(&k, 0, 1) == L'1' && VKeysChar(&k, 1, 0) == L'й' &&
+          VKeysChar(&k, 1, 4) == L'е' && VKeysChar(&k, 1, 5) == L'н' && VKeysChar(&k, 3, 9) == L'.', "the Russian keys as a PC's");
+    Check(VKeysRowLen(&k, 0) == 13 && VKeysRowLen(&k, 1) == 13 && VKeysRowLen(&k, 2) == 11 && VKeysRowLen(&k, 3) == 10 &&
+          VKeysRowLen(&k, 4) == 0 && VKeysRowLen(&k, -1) == 0, "rows of 13, 13, 11, 10");
     k.shift = true;
-    Check(VKeysChar(&k, 0, 0) == L'!' && VKeysChar(&k, 1, 0) == L'Й', "Shift: the digits' row - symbols, letters - capitals");
+    Check(VKeysChar(&k, 0, 1) == L'!' && VKeysChar(&k, 1, 0) == L'Й' && VKeysChar(&k, 0, 0) == L'Ё' &&
+          VKeysChar(&k, 3, 9) == L',', "Shift as a PC's: 1 - !, letters - capitals, . - ,");
     k.shift = false;
     k.en = true;
-    Check(VKeysChar(&k, 1, 0) == L'q' && VKeysChar(&k, 3, 0) == L'z', "the Latin keys");
+    Check(VKeysChar(&k, 1, 0) == L'q' && VKeysChar(&k, 3, 0) == L'z' && VKeysChar(&k, 0, 0) == L'`' &&
+          VKeysChar(&k, 1, 12) == L'\\', "the Latin keys as a PC's");
+    k.shift = true;
+    Check(VKeysChar(&k, 1, 10) == L'{' && VKeysChar(&k, 2, 9) == L':' && VKeysChar(&k, 3, 9) == L'?', "EN Shift: [ - {, ; - :, / - ?");
 }
 
 static void FieldChecks()
@@ -150,28 +154,27 @@ static void FieldChecks()
     DeleteDC(dc);
 }
 
-// The second characters (a long press, the user 2026-11-26: as Android's keyboard): every key has one; each layout
-// with them gives every printable ASCII character; Shift makes a letter's capital.
+// The other characters (a long press: a bubble): with them each layout holds every printable ASCII character; ё only
+// once; Shift's swap gives the key's own as the first other.
 static void AltChecks()
 {
     VKeys k;
     VKeysOpen(&k, L"", 10);
     for (int lang = 0; lang < 2; lang++) {
         k.en = lang == 1;
-        bool all = true, differ = true;
-        wchar_t seen[128] = { 0 };
+        bool seen[128] = { false };
+        int yo = 0;
         for (int r = 0; r < VKEYS_ROWS; r++)
             for (int c = 0; c < VKeysRowLen(&k, r); c++) {
-                wchar_t a = VKeysAlt(&k, r, c), m = VKeysChar(&k, r, c);
-                all = all && a != 0;
-                differ = differ && a != m;
-                if (a < 128)
-                    seen[a] = 1;
-                if (m < 128)
-                    seen[m] = 1;
+                wchar_t o[2], m = VKeysChar(&k, r, c);
+                int n = VKeysAlts(&k, r, c, o);
+                for (int i = -1; i < n; i++) {
+                    wchar_t ch = i < 0 ? m : o[i];
+                    if (ch < 128)
+                        seen[ch] = true;
+                    yo += ch == L'ё';
+                }
             }
-        Check(all, lang ? "EN: every key has a second character" : "RU: every key has a second character");
-        Check(differ, lang ? "EN: the second is not the key itself" : "RU: the second is not the key itself");
         bool ascii = true;
         for (int ch = 0x21; ch < 0x7F; ch++)
             if (!seen[ch] && !(ch >= L'a' && ch <= L'z') && !(ch >= L'A' && ch <= L'Z')) {
@@ -179,20 +182,35 @@ static void AltChecks()
                 printf("  %s: no '%c'\n", lang ? "EN" : "RU", ch);
             }
         Check(ascii, "every printable ASCII character in the layout");
+        Check(yo == (lang ? 0 : 1), "ё: once, its own key");
     }
     k.en = false;
-    Check(VKeysAlt(&k, 0, 0) == L'!' && VKeysAlt(&k, 0, 9) == L')', "the digits: ! .. )");
-    Check(VKeysAlt(&k, 3, 6) == L'ъ' && VKeysAlt(&k, 3, 0) == L'№', "ь: ъ, я: №");
-    Check(VKeysAltFor(&k, L'е') == L'ё', "е: ё (as Android's), ё keeps its own key too");
-    Check(VKeysAltFor(&k, L'ь') == L'ъ' && VKeysAltFor(&k, L'1') == L'!', "by the key's character");
-    Check(VKeysAltFor(&k, L' ') == 0 && VKeysAltFor(&k, L'q') == 0, "the space, another layout's key: none");
+    wchar_t o[2];
+    Check(VKeysAlts(&k, 0, 1, o) == 1 && o[0] == L'!', "1: !");
+    Check(VKeysAlts(&k, 0, 2, o) == 2 && o[0] == L'"' && o[1] == L'@', "2: \" and @");
+    Check(VKeysAlts(&k, 1, 0, o) == 0, "й: none");
+    Check(VKeysAltsFor(&k, L'.', o) == 2 && o[0] == L',' && o[1] == L'…', "by the key's character: . - , …");
+    Check(VKeysAltsFor(&k, L' ', o) == 0 && VKeysAltsFor(&k, L'q', o) == 0, "the space, another layout's key: none");
     k.shift = true;
-    Check(VKeysAlt(&k, 3, 6) == L'Ъ', "Shift: the second letter's capital");
-    Check(VKeysAltFor(&k, L'Ь') == L'Ъ', "Shift: found by the capital shown");
-    Check(VKeysAlt(&k, 0, 0) == L'1' && VKeysAltFor(&k, L'@') == L'2', "Shift's symbols row: the digit as the second");
+    Check(VKeysAlts(&k, 0, 1, o) == 1 && o[0] == L'1', "Shift: 1 shows !, its other is 1");
+    Check(VKeysAltsFor(&k, L'"', o) == 2 && o[0] == L'2' && o[1] == L'@', "Shift: found by the shown sign");
+    Check(VKeysAlts(&k, 3, 7, o) == 2 && o[0] == L'<' && o[1] == L'«', "Shift on a letter: its others as they are");
     k.shift = false;
     k.en = true;
-    Check(VKeysAlt(&k, 1, 0) == L'+' && VKeysAltFor(&k, L'l') == L'?', "EN: q: +, l: ?");
+    Check(VKeysAlts(&k, 1, 2, o) == 1 && o[0] == L'€', "EN e: €");
+}
+
+// The bubble: centred over the key, kept on the screen; the finger picks the cell under it, out of it the nearest end.
+static void BubbleChecks()
+{
+    Check(VKeysBubbleX(100, 56, 2, 56, 800) == 72, "centred over the key");
+    Check(VKeysBubbleX(0, 56, 2, 56, 800) == 0, "at the left edge: kept on the screen");
+    Check(VKeysBubbleX(780, 56, 2, 56, 800) == 688, "at the right edge: kept on the screen");
+    Check(VKeysBubbleX(744, 56, 1, 56, 800) == 744, "one cell at the right edge: its own place");
+    Check(VKeysBubbleSel(80, 72, 56, 2) == 0 && VKeysBubbleSel(127, 72, 56, 2) == 0, "over the first cell");
+    Check(VKeysBubbleSel(128, 72, 56, 2) == 1 && VKeysBubbleSel(183, 72, 56, 2) == 1, "over the second");
+    Check(VKeysBubbleSel(10, 72, 56, 2) == 0 && VKeysBubbleSel(500, 72, 56, 2) == 1, "out of it: the nearest end");
+    Check(VKeysBubbleSel(184, 72, 56, 2) == 1, "just past its right edge: the last");
 }
 
 int main()
@@ -202,6 +220,7 @@ int main()
     KeyChecks();
     FieldChecks();
     AltChecks();
+    BubbleChecks();
     printf("%d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
