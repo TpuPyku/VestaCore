@@ -74,6 +74,11 @@ API — `vnav.h`. Проверка — `test_vnav.bat`.
 - `VFontMake(face, height, weight)`: шрифт без сглаживания (на ГУ сглаживание становится ClearType — цветная
   кайма в 16-битном кадре). Проверка — `test_vfont.bat`.
 
+### `vtheme` — тема VestaHome для программ рядом с ним
+- Цвета: встроенные → `Skin\skin.ini` VestaHome → акцент из «Тема» (`screen.accent` в `VestaHome.ini`, код краски Lada; 130 Марс — свой акцент темы) → `VHContent\Skin\user_skin.ini` (SD, затем раздел; его акцент главнее выбранного). `VThemeFindVh` — папка VestaHome (`\ResidentFlash\VestaHome\`, `\SDMMC\VestaHome\`; ПК — `VestaHome\` рядом с exe). Первым пользуется VestaFiles.
+
+API — `vtheme.h`. Проверка — `test_vtheme.bat`.
+
 ### `vlicense` — лицензия поддержки VestaHome
 - `LicenseIdText` — ID ГУ для пользователя (`VH-XXXXX-XXXXX`, SHA-256 аппаратного ID, 50 бит); `LicenseValid` —
   файл `VestaLicense.key` (подпись ECDSA P-256 автора по ID) проверяется без сети, открытый ключ — `vlicense_key.inc`.
