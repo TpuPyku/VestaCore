@@ -56,7 +56,7 @@ static void TestFields()
 {
     VCan3 c;
     VCan3Init(&c);
-    Check(!c.hasSpeed && !c.hasSteer && !c.hasGear && !c.hasDoors && !c.hasStatus && !c.hasPos && !c.hasMove &&
+    Check(!c.hasSpeed && !c.hasSteer && !c.hasGear && !c.hasDoors && !c.hasWheel && !c.hasPos && !c.hasMove &&
           !c.hasUtc && c.frames == 0, "init: nothing seen");
     unsigned char f[16];
     unsigned char sp[8] = { 0, 0, 0, 0x12, 0x34, 0, 0, 0 };   // (0x12 << 4 | 0x34 >> 4) = 0x123 = 291 km/h
@@ -82,7 +82,11 @@ static void TestFields()
     unsigned char ss[8] = { 0x80, 0x05, 0, 0, 0, 0, 0, 0 };
     Make(f, 0, 0xc6, ss);
     VCan3Frame(&c, f);
-    Check(c.hasStatus && c.status == 0x8005, "0xc6: status = data[0] << 8 | data[1]");
+    Check(c.hasWheel && c.wheel == 0x8005 && c.wheelN == 1, "0xc6: the wheel raw = data[0] << 8 | data[1], counted");
+    unsigned char cs[8] = { 0x04, 0xD2, 0, 0, 0, 0, 0, 0 };
+    Make(f, 5, 0xd7, cs);
+    VCan3Frame(&c, f);
+    Check(c.hasCar && c.carKmh100 == 1234, "0xd7: the car's speed, km/h x 100 = data[0] << 8 | data[1]");
     unsigned char po[8] = { 0x02, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFE };
     Make(f, 4, 0xa2, po);
     VCan3Frame(&c, f);
@@ -100,7 +104,7 @@ static void TestFields()
     VCan3 d = c;
     Make(f, 2, 0x18, no);   // a code not decoded, and a known code under another type
     VCan3Frame(&c, f);
-    static const int other[][2] = { { 3, 0x17 }, { 6, 0x53 }, { 5, 0x46 }, { 5, 0xd7 }, { 0, 0xde }, { 0, 0x86 },
+    static const int other[][2] = { { 3, 0x17 }, { 6, 0x53 }, { 5, 0x46 }, { 0, 0xd7 }, { 0, 0xde }, { 0, 0x86 },
                                     { 1, 0xc6 }, { 4, 0x50 } };
     for (int i = 0; i < 8; i++) {
         Make(f, other[i][0], other[i][1], no);
@@ -125,7 +129,7 @@ static void TestFeed()
     int n3 = VCan3Feed(&c, s + 30, sizeof(s) - 30);
     Check(n1 == 0 && n2 == 1 && n3 == 2, "feed: frames across the reads");
     Check(c.frames == 3 && c.skipped == 3, "feed: 3 frames, the 3 junk bytes skipped");
-    Check(c.gear == 2 && c.doors == 0xC2 && c.status == 0xC200, "feed: each frame decoded");
+    Check(c.gear == 2 && c.doors == 0xC2 && c.wheel == 0xC200, "feed: each frame decoded");
     unsigned char bad[16];
     memcpy(bad, s + 3, 16);
     bad[15] ^= 0x10;
@@ -161,6 +165,85 @@ static void TestReal()
     Check(c.hasGear && c.gear == 5 && c.hasSteer && c.steer == 951 && c.hasDoors && c.doors == 0,
           "real: gear 5, the wheel 951, doors 0");
     Check(!c.hasSpeed, "real: no 0x17 while parked");
+    char s[64];
+    Check(c.hasWheel && c.wheel == 0x8005 && VCan3Ang(&c, s, 64) && !strncmp(s, "@ANG,0.4,", 9),
+          "real: the wheel straight - @ANG 0.4");
+}
+
+// The lines can_panel writes to COM4 / COM5 / COM7, made here (the user 2026-11-27: GPS and the wheel without it)
+static void TestNmea()
+{
+    char s[128];
+    Check(VCan3Nmea(s, 128, "@ANG,31.0,") && !strcmp(s, "@ANG,31.0,*54\r\n"), "nmea: the panel's own line, its sum");
+    Check(VCan3Nmea(s, 128, "@,000,2.34") && !strcmp(s, "@,000,2.34*2B\r\n"), "nmea: the sum after the first char");
+    Check(!VCan3Nmea(s, 10, "@ANG,31.0,"), "nmea: no room - nothing");
+    VCan3 c;
+    VCan3Init(&c);
+    Check(!VCan3Ang(&c, s, 128) && !VCan3Car(&c, s, 128) && !VCan3Rmc(&c, s, 128) && !VCan3Gga(&c, s, 128),
+          "nothing seen: no lines");
+    c.hasWheel = true;
+    c.wheel = 33231;   // (the tester's car parked: the panel said @ANG,31.0 just after)
+    Check(VCan3Ang(&c, s, 128) && !strcmp(s, "@ANG,30.9,*5C\r\n"), "@ANG: (raw - 32767) / 15");
+    c.wheel = 28267;
+    Check(VCan3Ang(&c, s, 128) && !strcmp(s, "@ANG,-300.0,*48\r\n"), "@ANG: to the left, negative");
+    c.wheel = 32766;
+    Check(VCan3Ang(&c, s, 128) && !strcmp(s, "@ANG,-0.1,*4A\r\n"), "@ANG: a tenth");
+    c.wheel = 0;
+    Check(VCan3Ang(&c, s, 128) && !strcmp(s, "@ANG,0.0,*66\r\n"), "@ANG: raw 0 - 0 (as the panel)");
+    c.hasCar = true;
+    c.carKmh100 = 1299;
+    Check(VCan3Car(&c, s, 128) && !strcmp(s, "@,012,2.34*28\r\n"), "@,: the car's km/h, whole, and the module's 2.34");
+    c.hasPos = c.hasMove = c.hasUtc = true;
+    c.lat = 55 * 600000L + 451234;
+    c.lon = 37 * 600000L + 375000;
+    c.utcMs = 45296000;   // 12:34:56
+    c.kn100 = 1050;
+    c.course100 = 27050;
+    c.day = 27;
+    c.month = 11;
+    c.year = 26;
+    Check(VCan3Rmc(&c, s, 128) && !strcmp(s, "$GPRMC,123456.00,A,5545.1234,N,03737.5000,E,10.50,270.50,271126,,,A*6C\r\n"),
+          "RMC: position ddmm.mmmm, knots, the course in degrees (not the panel's x/127), the date");
+    Check(VCan3Gga(&c, s, 128) && !strcmp(s, "$GPGGA,123456.00,5545.1234,N,03737.5000,E,1,12,1.0,0.0,M,0.0,M,,*59\r\n"),
+          "GGA: a fix, 12 satellites (as the panel)");
+    c.lat = -300000;
+    c.lon = -600001;
+    c.utcMs = 1999;
+    c.kn100 = c.course100 = 0;
+    c.day = c.month = 1;
+    c.year = 25;
+    Check(VCan3Rmc(&c, s, 128) && !strcmp(s, "$GPRMC,000001.00,A,0030.0000,S,00100.0001,W,0.00,0.00,010125,,,A*54\r\n"),
+          "RMC: south, west, the seconds whole, the zeros");
+    c.hasUtc = false;
+    Check(!VCan3Rmc(&c, s, 128) && !VCan3Gga(&c, s, 128), "no time yet: no position lines");
+    c.hasUtc = true;
+    c.hasMove = false;
+    Check(!VCan3Rmc(&c, s, 128) && VCan3Gga(&c, s, 128), "no speed / date yet: GGA only");
+    c.hasMove = true;
+    Check(!VCan3Rmc(&c, s, 40), "RMC: no room - nothing");
+    Check(VCan3Nmea(s, 16, "@ANG,31.0,") && !VCan3Nmea(s, 15, "@ANG,31.0,"), "nmea: the room exact (*XX, CR LF, 0)");
+    c.carKmh100 = 10000;
+    Check(VCan3Car(&c, s, 128) && !strcmp(s, "@,100,2.34*2A\r\n"), "@,: 100 km/h");
+    c.lat = -(55 * 600000L + 599999);
+    c.lon = 37 * 600000L + 599999;
+    c.utcMs = 3600000;   // 01:00:00
+    c.kn100 = 10000;
+    c.course100 = 35999;
+    c.day = 31;
+    c.month = 12;
+    c.year = 99;
+    Check(VCan3Rmc(&c, s, 128) && !strcmp(s, "$GPRMC,010000.00,A,5559.9999,S,03759.9999,E,100.00,359.99,311299,,,A*49\r\n"),
+          "RMC: the minutes' edges, an hour, 100 knots");
+    c.lat = c.lon = 0;
+    Check(VCan3Gga(&c, s, 128) && !strcmp(s, "$GPGGA,010000.00,0000.0000,N,00000.0000,E,1,12,1.0,0.0,M,0.0,M,,*5F\r\n"),
+          "GGA: 0, 0 - north, east");
+    c.lat = 56 * 600000L;
+    c.lon = 38 * 600000L + 10000;
+    Check(VCan3Gga(&c, s, 128) && !strcmp(s, "$GPGGA,010000.00,5600.0000,N,03801.0000,E,1,12,1.0,0.0,M,0.0,M,,*56\r\n"),
+          "GGA: whole degrees, a whole minute");
+    c.lon = 38 * 600000L;
+    Check(VCan3Gga(&c, s, 128) && !strcmp(s, "$GPGGA,010000.00,5600.0000,N,03800.0000,E,1,12,1.0,0.0,M,0.0,M,,*57\r\n"),
+          "GGA: whole degrees");
 }
 
 int main()
@@ -169,6 +252,7 @@ int main()
     TestFields();
     TestFeed();
     TestReal();
+    TestNmea();
     printf("test_vcan3: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
 }
