@@ -45,44 +45,84 @@ static void Gps(VCan3* c, int code, const unsigned char* d)
     }
 }
 
-static void Drive(VCan3* c, int type, int code, const unsigned char* d)   // the speed, the wheel, the gear
+// One function a frame type, each knowing its codes only (can_panel 1.3.6.1's dispatcher; vcan3.h)
+static void Type012(VCan3* c, int type, int code, const unsigned char* d)   // the wheel, the revs, the speed
 {
-    if (type == 2 && code == 0x17) {
-        c->hasSpeed = true;
-        c->speed10 = (d[3] << 4 | d[4] >> 4) * 10;
-    } else if (type == 6 && code == 0x46) {
-        int v = (d[2] & 0x7F) << 9 | d[3] << 1 | d[4] >> 7;
-        c->hasSteer = true;
-        c->steer = v & 0x8000 ? v - 0x10000 : v;
-    } else if (type == 3 && code == 0x50) {
-        c->hasGear = true;
-        c->gear = d[0] & 7;
-    }
-}
-
-static void Body(VCan3* c, int type, int code, const unsigned char* d)   // the doors, the wheel, the car's speed
-{
-    if (type == 5 && code == 0xde) {
-        c->hasDoors = true;
-        c->doors = d[0];
-    } else if (type == 0 && code == 0xc6) {
+    if (type == 0 && code == 0xc6) {
         c->hasWheel = true;
         c->wheel = d[0] << 8 | d[1];
         c->wheelN++;
-    } else if (type == 5 && code == 0xd7) {
+    } else if (type == 1 && code == 0x86) {
+        c->hasRpm = true;
+        c->rpm = (d[0] << 8 | d[1]) >> 3;
+    } else if (type == 2 && code == 0x17) {   // (other cars)
+        c->hasSpeed = true;
+        c->speed10 = (d[3] << 4 | d[4] >> 4) * 10;
+    }
+}
+
+static void Type3(VCan3* c, int, int code, const unsigned char* d)   // the ignition and what is open, the air outside
+{
+    if (code == 0x50) {
+        c->hasBody = true;
+        c->ign = d[0] & 7;
+        c->open = (d[6] & 0x20 ? VCO_FL : 0) | (d[6] & 0x08 ? VCO_FR : 0) | (d[7] & 0x02 ? VCO_REAR : 0) |
+                  (d[4] & 0x08 ? VCO_TRUNK : 0) | (d[7] & 0x08 ? VCO_HOOD : 0);
+    } else if (code == 0xb7) {
+        c->hasAir = true;
+        c->airC = d[0] - 40;
+    }
+}
+
+static void Type4(VCan3* c, int, int code, const unsigned char* d)   // GPS, the handbrake
+{
+    if (code != 0xf8) {
+        Gps(c, code, d);
+        return;
+    }
+    c->hasHand = true;
+    c->hand = (d[0] & 8) != 0;
+}
+
+static void Type5(VCan3* c, int, int code, const unsigned char* d)   // the lights, the car's speed, the coolant
+{
+    if (code == 0xde) {
+        c->hasLight = true;
+        c->light = d[0];
+    } else if (code == 0xd7) {
         c->hasCar = true;
         c->carKmh100 = d[0] << 8 | d[1];
+    } else if (code == 0xda && d[0]) {
+        c->hasCool = true;
+        c->coolC = d[0] - 40;
+    }
+}
+
+static void Type6(VCan3* c, int, int code, const unsigned char* d)   // the trip computer, the fuel, the climate
+{
+    if (code == 0x46) {
+        c->hasTrip = true;
+        c->use10 = (d[0] & 0x3F) << 8 | d[1];
+        c->trip10 = (d[2] & 0x7F) << 9 | d[3] << 1 | d[4] >> 7;
+        c->used10 = (d[4] & 0x3F) << 8 | d[5];
+        c->avg10 = d[6] << 4 | d[7] >> 4;
+    } else if (code == 0xfb) {
+        c->hasFuel = true;
+        c->fuel2 = d[3];
+        c->rangeKm = (d[1] & 0x0F) << 8 | d[2];
+    } else if (code == 0x99) {
+        c->hasClima = true;
+        c->climaT = d[1];
+        c->fan = d[3] >> 4;
     }
 }
 
 void VCan3Frame(VCan3* c, const unsigned char* f)
 {
-    if (f[4] == 4) {
-        Gps(c, f[5], f + 6);
-        return;
-    }
-    Drive(c, f[4], f[5], f + 6);   // (each knows its own codes only)
-    Body(c, f[4], f[5], f + 6);
+    static void (*const types[7])(VCan3*, int, int, const unsigned char*) = { Type012, Type012, Type012, Type3,
+                                                                               Type4, Type5, Type6 };
+    if (f[4] < 7)   // (type 7: the units' diagnostics - not read)
+        types[f[4]](c, f[4], f[5], f + 6);
 }
 
 int VCan3Feed(VCan3* c, const unsigned char* p, int n)

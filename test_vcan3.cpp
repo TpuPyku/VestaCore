@@ -56,29 +56,96 @@ static void TestFields()
 {
     VCan3 c;
     VCan3Init(&c);
-    Check(!c.hasSpeed && !c.hasSteer && !c.hasGear && !c.hasDoors && !c.hasWheel && !c.hasPos && !c.hasMove &&
-          !c.hasUtc && c.frames == 0, "init: nothing seen");
+    Check(!c.hasSpeed && !c.hasTrip && !c.hasBody && !c.hasLight && !c.hasWheel && !c.hasPos && !c.hasMove &&
+          !c.hasUtc && !c.hasHand && !c.hasRpm && !c.hasAir && !c.hasCool && !c.hasFuel && !c.hasClima &&
+          c.frames == 0, "init: nothing seen");
     unsigned char f[16];
     unsigned char sp[8] = { 0, 0, 0, 0x12, 0x34, 0, 0, 0 };   // (0x12 << 4 | 0x34 >> 4) = 0x123 = 291 km/h
     Make(f, 2, 0x17, sp);
     VCan3Frame(&c, f);
     Check(c.hasSpeed && c.speed10 == 2910, "0x17: speed (data[3] << 4 | data[4] >> 4) x 10");
-    unsigned char st[8] = { 0, 0, 0x40, 0x00, 0x80, 0, 0, 0 };   // bit 15 set, bit 0 set: -32767
-    Make(f, 6, 0x46, st);
+    // 0x46 the trip computer: the average use ((d0 & 0x3f) << 8 | d1), the trip ((d2 & 0x7f) << 9 | d3 << 1 |
+    // d4 >> 7), the fuel used ((d4 & 0x3f) << 8 | d5), the average speed (d6 << 4 | d7 >> 4), each x 0.1
+    unsigned char tr[8] = { 0xC0 | 0x01, 0x02, 0x80 | 0x03, 0x04, 0x80 | 0x40 | 0x05, 0x06, 0x07, 0x8F };
+    Make(f, 6, 0x46, tr);
     VCan3Frame(&c, f);
-    Check(c.hasSteer && c.steer == -32767, "0x46: the angle, signed");
-    unsigned char st2[8] = { 0, 0, 0x01, 0xDB, 0x80, 0, 0, 0 };   // the recording's 951
-    Make(f, 6, 0x46, st2);
+    Check(c.hasTrip && c.use10 == 0x102 && c.trip10 == (3 << 9 | 4 << 1 | 1) && c.used10 == 0x506 && c.avg10 == 0x78,
+          "0x46: the trip computer's four, the bits beside each masked");
+    unsigned char bo[8] = { 0xC5, 0, 0, 0, 0x08, 0, 0x20 | 0x08, 0x02 | 0x08 };
+    Make(f, 3, 0x50, bo);
     VCan3Frame(&c, f);
-    Check(c.steer == (1 << 9 | 0xDB << 1 | 1), "0x46: (d2 & 0x7F) << 9 | d3 << 1 | d4 >> 7");
-    unsigned char ge[8] = { 0xC5, 0, 0, 0, 0, 0, 0, 0 };
-    Make(f, 3, 0x50, ge);
+    Check(c.hasBody && c.ign == 5 && c.open == (VCO_FL | VCO_FR | VCO_REAR | VCO_TRUNK | VCO_HOOD),
+          "0x50: the ignition data[0] & 7, all open");
+    unsigned char bo2[8] = { 0x04, 0xFF, 0xFF, 0xFF, 0xF7, 0xFF, 0xD7, 0xF5 };   // every other bit set
+    Make(f, 3, 0x50, bo2);
     VCan3Frame(&c, f);
-    Check(c.hasGear && c.gear == 5, "0x50: gear = data[0] & 7");
-    unsigned char dr[8] = { 0x81, 0, 0, 0, 0, 0, 0, 0 };
+    Check(c.ign == 4 && c.open == 0, "0x50: the other bits are no door");
+    unsigned char bo3[8] = { 0, 0, 0, 0, 0, 0, 0x20, 0 };
+    Make(f, 3, 0x50, bo3);
+    VCan3Frame(&c, f);
+    Check(c.open == VCO_FL, "0x50: the front left alone");
+    bo3[6] = 0x08;
+    Make(f, 3, 0x50, bo3);
+    VCan3Frame(&c, f);
+    Check(c.open == VCO_FR, "0x50: the front right alone");
+    bo3[6] = 0;
+    bo3[7] = 0x02;
+    Make(f, 3, 0x50, bo3);
+    VCan3Frame(&c, f);
+    Check(c.open == VCO_REAR, "0x50: the rear alone");
+    bo3[7] = 0x08;
+    Make(f, 3, 0x50, bo3);
+    VCan3Frame(&c, f);
+    Check(c.open == VCO_HOOD, "0x50: the hood alone");
+    bo3[7] = 0;
+    bo3[4] = 0x08;
+    Make(f, 3, 0x50, bo3);
+    VCan3Frame(&c, f);
+    Check(c.open == VCO_TRUNK, "0x50: the trunk alone");
+    unsigned char dr[8] = { 0x62, 0xFF, 0, 0, 0, 0, 0, 0 };   // (vhcan6: the hazard lights with the low beam)
     Make(f, 5, 0xde, dr);
     VCan3Frame(&c, f);
-    Check(c.hasDoors && c.doors == 0x81, "0xde: doors = data[0]");
+    Check(c.hasLight && c.light == (VCL_LOW | VCL_LEFT | VCL_RIGHT), "0xde: the lights = data[0]");
+    unsigned char hb[8] = { 0x58, 0xC0, 0, 0, 0, 0, 0, 0 };
+    Make(f, 4, 0xf8, hb);
+    VCan3Frame(&c, f);
+    Check(c.hasHand && c.hand, "0xf8: the handbrake up, data[0] & 8 (vhcan6 0x58)");
+    hb[0] = 0x54;
+    Make(f, 4, 0xf8, hb);
+    VCan3Frame(&c, f);
+    Check(c.hasHand && !c.hand, "0xf8: down (0x54)");
+    hb[0] = 0xF7;
+    Make(f, 4, 0xf8, hb);
+    VCan3Frame(&c, f);
+    Check(!c.hand, "0xf8: every bit but 0x08 - down");
+    unsigned char rp[8] = { 0x5D, 0xC7, 0, 0, 0, 0, 0, 0 };   // (0x5dc7 >> 3 = 3000)
+    Make(f, 1, 0x86, rp);
+    VCan3Frame(&c, f);
+    Check(c.hasRpm && c.rpm == 3000, "0x86: the revs (d0 << 8 | d1) >> 3");
+    unsigned char ai[8] = { 0x24, 0, 0, 0, 0, 0, 0, 0 };
+    Make(f, 3, 0xb7, ai);
+    VCan3Frame(&c, f);
+    Check(c.hasAir && c.airC == -4, "0xb7: outside data[0] - 40");
+    unsigned char co[8] = { 0, 0x6F, 0, 0, 0, 0, 0, 0 };
+    Make(f, 5, 0xda, co);
+    VCan3Frame(&c, f);
+    Check(!c.hasCool, "0xda: data[0] 0 - not taken (the panel's)");
+    co[0] = 0x4E;
+    Make(f, 5, 0xda, co);
+    VCan3Frame(&c, f);
+    Check(c.hasCool && c.coolC == 38, "0xda: the coolant data[0] - 40");
+    co[0] = 0;
+    Make(f, 5, 0xda, co);
+    VCan3Frame(&c, f);
+    Check(c.coolC == 38, "0xda: a 0 later keeps the last");
+    unsigned char fu[8] = { 0x1F, 0xF2, 0x8F, 0x5E, 0xFF, 0, 0, 0xFF };
+    Make(f, 6, 0xfb, fu);
+    VCan3Frame(&c, f);
+    Check(c.hasFuel && c.fuel2 == 94 && c.rangeKm == 0x28F, "0xfb: the fuel d3 (0.5 l), the range (d1 & 15) << 8 | d2");
+    unsigned char cl[8] = { 0, 0x2C, 0, 0x5F, 0, 0, 0, 0 };
+    Make(f, 6, 0x99, cl);
+    VCan3Frame(&c, f);
+    Check(c.hasClima && c.climaT == 0x2C && c.fan == 5, "0x99: the climate's temperature d1, the fan d3 >> 4");
     unsigned char ss[8] = { 0x80, 0x05, 0, 0, 0, 0, 0, 0 };
     Make(f, 0, 0xc6, ss);
     VCan3Frame(&c, f);
@@ -105,8 +172,9 @@ static void TestFields()
     Make(f, 2, 0x18, no);   // a code not decoded, and a known code under another type
     VCan3Frame(&c, f);
     static const int other[][2] = { { 3, 0x17 }, { 6, 0x53 }, { 5, 0x46 }, { 0, 0xd7 }, { 0, 0xde }, { 0, 0x86 },
-                                    { 1, 0xc6 }, { 4, 0x50 } };
-    for (int i = 0; i < 8; i++) {
+                                    { 1, 0xc6 }, { 4, 0x50 }, { 0, 0xf8 }, { 0, 0xb7 }, { 0, 0xda }, { 0, 0xfb },
+                                    { 0, 0x99 }, { 4, 0x86 } };
+    for (int i = 0; i < 14; i++) {
         Make(f, other[i][0], other[i][1], no);
         VCan3Frame(&c, f);
     }
@@ -129,7 +197,7 @@ static void TestFeed()
     int n3 = VCan3Feed(&c, s + 30, sizeof(s) - 30);
     Check(n1 == 0 && n2 == 1 && n3 == 2, "feed: frames across the reads");
     Check(c.frames == 3 && c.skipped == 3, "feed: 3 frames, the 3 junk bytes skipped");
-    Check(c.gear == 2 && c.doors == 0xC2 && c.wheel == 0xC200, "feed: each frame decoded");
+    Check(c.ign == 2 && c.light == 0xC2 && c.wheel == 0xC200, "feed: each frame decoded");
     unsigned char bad[16];
     memcpy(bad, s + 3, 16);
     bad[15] ^= 0x10;
@@ -140,34 +208,77 @@ static void TestFeed()
     Check(VCan3Feed(&c, s, 0) == 0, "feed: nothing read");
 }
 
-// The tester's recording: chunks [ms u32 LE][len u16 LE][bytes] (VestaHome canrec.h)
-static void TestReal()
+// The tester's recordings: chunks [ms u32 LE][len u16 LE][bytes] (VestaHome canrec.h); the bytes run together
+// into b, 0 - no MAIN
+static int Load(const char* name, unsigned char* b, int cap)
 {
-    FILE* f = fopen("..\\MAIN\\HU_logs\\canpanel logs\\4123\\VestaLogs\\com3_261127_214806.bin", "rb");
+    char p[160];
+    sprintf(p, "..\\MAIN\\HU_logs\\canpanel logs\\%s", name);
+    FILE* f = fopen(p, "rb");
     if (!f) {
         printf("(no MAIN: the real recording skipped)\n");
-        return;
+        return 0;
     }
-    static unsigned char b[400000];
-    int len = (int)fread(b, 1, sizeof(b), f);
+    static unsigned char r[400000];
+    int len = (int)fread(r, 1, sizeof(r), f), n = 0;
     fclose(f);
+    for (int i = 0; i + 6 <= len && n < cap;) {
+        int k = r[i + 4] | r[i + 5] << 8;
+        memcpy(b + n, r + i + 6, k);
+        n += k;
+        i += 6 + k;
+    }
+    return n;
+}
+
+static void TestReal()
+{
+    static unsigned char b[400000];
+    int len = Load("4123\\VestaLogs\\com3_261127_214806.bin", b, sizeof(b));
+    if (!len)
+        return;
     VCan3 c;
     VCan3Init(&c);
-    int found = 0;
-    for (int i = 0; i + 6 <= len;) {
-        int n = b[i + 4] | b[i + 5] << 8;
-        found += VCan3Feed(&c, b + i + 6, n);
-        i += 6 + n;
-    }
+    int found = VCan3Feed(&c, b, len);
     Check(c.frames == 19292 && found == 19292 && c.skipped == 2, "real: 19292 frames, 2 bytes before the first");
     Check(c.hasPos && c.lat != 0 && c.lon != 0, "real: a position");
     Check(c.hasMove && c.kn100 == 0 && c.day == 27 && c.month == 11 && c.year == 26, "real: parked, 27.11.26");
-    Check(c.hasGear && c.gear == 5 && c.hasSteer && c.steer == 951 && c.hasDoors && c.doors == 0,
-          "real: gear 5, the wheel 951, doors 0");
+    Check(c.hasBody && c.ign == 5 && c.hasTrip && c.trip10 == 951 && c.hasLight && c.light == 0,
+          "real: the ignition on, the trip 95.1 km, no lights");
     Check(!c.hasSpeed, "real: no 0x17 while parked");
     char s[64];
     Check(c.hasWheel && c.wheel == 0x8005 && VCan3Ang(&c, s, 64) && !strncmp(s, "@ANG,0.4,", 9),
           "real: the wheel straight - @ANG 0.4");
+}
+
+// vhcan6 (2026-11-27): the doors one by one as the user was asked, the hazard lights, the high beam, the handbrake
+// up and down, then the ignition on
+static void TestReal6()
+{
+    static unsigned char b[400000];
+    int len = Load("vhcan6\\com3_261127_231454.bin", b, sizeof(b));
+    if (!len)
+        return;
+    VCan3 c;
+    VCan3Init(&c);
+    int order[8], no = 0, lights = 0, hands = 0, open = 0;
+    bool hand = false;
+    for (int i = 0; i < len; i++) {
+        VCan3Feed(&c, b + i, 1);
+        int added = c.open & ~open;   // (each door's first opening; the front left opened twice)
+        if (added && no < 8)
+            order[no++] = added;
+        open |= c.open;
+        lights |= c.light;
+        hands += c.hasHand && c.hand != hand;
+        hand = c.hand;
+    }
+    Check(no == 5 && order[0] == VCO_FL && order[1] == VCO_FR && order[2] == VCO_REAR && order[3] == VCO_HOOD &&
+          order[4] == VCO_TRUNK, "vhcan6: the doors in the asked order");
+    Check(lights == (VCL_HIGH | VCL_LOW | VCL_LEFT | VCL_RIGHT), "vhcan6: the lights seen");
+    Check(hands == 7, "vhcan6: the handbrake up, then down and up three times");
+    Check(c.ign == 5 && c.airC == -3 && c.coolC == 38 && c.fuel2 == 94 && c.rangeKm == 656 && c.rpm == 0,
+          "vhcan6: the end - the ignition on, -3, 38, 47 l, 656 km, the engine off");
 }
 
 // The lines can_panel writes to COM4 / COM5 / COM7, made here (the user 2026-11-27: GPS and the wheel without it)
@@ -252,6 +363,7 @@ int main()
     TestFields();
     TestFeed();
     TestReal();
+    TestReal6();
     TestNmea();
     printf("test_vcan3: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed;
