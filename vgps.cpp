@@ -444,11 +444,17 @@ static void PlayFile(const wchar_t* name)
 // This program's own lines (GpsConfig.source) in place of the port's, as they come.
 static void SourceLoop()
 {
+    EnterCriticalSection(&s_cs);
+    s_reopen = false;   // (GpsSetSource's: the port's loop left for this one)
+    LeaveCriticalSection(&s_cs);
     SetStatus(GPS_OPEN, s_cfgApp, 0);
     s_lineLen = 0;
     while (!s_stop && !s_reopen && !s_scanReq) {
         char buf[1024];
-        int got = s_cfg.source(buf, sizeof(buf));
+        GpsSourceFn src = s_cfg.source;   // (GpsSetSource may take it away meanwhile)
+        if (!src)
+            break;
+        int got = src(buf, sizeof(buf));
         if (got > 0) {
             EnterCriticalSection(&s_cs);
             s_state.bytes += got;
@@ -705,6 +711,19 @@ void GpsConfigure(const wchar_t* port, DWORD baud)
     s_state.lines = s_state.badLines = 0;
     s_state.last[0] = 0;
     s_state.found = 0;
+    s_reopen = true;
+    LeaveCriticalSection(&s_cs);
+    SetEvent(s_wake);
+}
+
+// The source switched while running (VestaHome's CAN bridge, 2026-11-28: the panel off - its lines, back on - the
+// port): the loop in hand ends, the next one is the source's or the port's
+void GpsSetSource(GpsSourceFn source)
+{
+    if (!s_thread)
+        return;
+    EnterCriticalSection(&s_cs);
+    s_cfg.source = source;
     s_reopen = true;
     LeaveCriticalSection(&s_cs);
     SetEvent(s_wake);

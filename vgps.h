@@ -72,6 +72,7 @@ void GpsStart(const GpsConfig* cfg);
 void GpsStop();
 void GpsGet(GpsState* s);                             // also re-arms the notify message
 void GpsConfigure(const wchar_t* port, DWORD baud);   // reopen with new settings (used when reading the port)
+void GpsSetSource(GpsSourceFn source);                // this program's own lines from now on (NULL: the port again)
 void GpsScan();                                       // look for NMEA on COM1..COM9 (only when reading the port)
 
 // ---- the shared memory "VestaGPS" (the reader's state and its last checked lines), here for the programs and
